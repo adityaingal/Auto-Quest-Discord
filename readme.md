@@ -88,15 +88,16 @@ registered globally (Discord can take up to an hour to propagate).
 
 | Subcommand | Description |
 | --- | --- |
-| `/quest list` | All available quests with id, application and eligibility (dropdown + pagination) |
-| `/quest info` | Full details: task types, requirements, platform, rewards |
+| `/quest list [account]` | All available quests with id, application and eligibility (dropdown + pagination) |
+| `/quest info <quest> [account]` | Full details: task types, requirements, platform, rewards |
 | `/quest start` | Eligibility check and the official enrolment route (confirmation buttons) |
-| `/quest auto <quest>` | Complete one quest with the configured user session |
-| `/quest all` | Complete every available quest, with a live progress bar and timer |
+| `/quest auto <quest> [account]` | Complete one quest with the configured user session |
+| `/quest all [account]` | Complete every available quest - **all accounts start at the same time** |
 | `/quest all stop` | Stop the running queue after the current quest |
 | `/quest sessions` | The user accounts (sessions) the bot works with - no token is shown |
+| `/quest switch <account>` | Choose the account the bot works with (`all` uses every account) |
 | `/quest progress` | Recorded progress with progress bars |
-| `/quest status` | Status of one quest for your account |
+| `/quest status <quest> [account]` | Status of one quest for your account |
 | `/quest refresh` | Refresh the quest information and store it |
 | `/quest history` | Your recent quest activity |
 
@@ -262,6 +263,24 @@ registered on one instance stays readable on the others.
 
 > One user token can only be used by one session at a time - opening a second
 > gateway session with it invalidates the first one.
+
+### Several accounts at the same time
+
+Every user token is an account. The bot works with all of them:
+
+| Command | Effect |
+| --- | --- |
+| `/quest sessions` | Lists the accounts, their state and the selected one |
+| `/quest switch <account>` | Works only with that account from now on |
+| `/quest switch account:all` | Uses every account again |
+| `/quest all` | Runs the quests of **all** accounts - they all start at the same time |
+| `/quest all account:<label>` | Runs the quests of one account |
+| `/quest auto <quest>` | Runs one quest on every account that offers it |
+
+The quests of all accounts are enrolled and advanced **in parallel**, so a
+video quest that needs five minutes is finished after five minutes and not
+after five minutes per account. The selection made with `/quest switch`
+survives a restart.
 
 Docker works as well:
 

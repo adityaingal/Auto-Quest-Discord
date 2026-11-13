@@ -256,18 +256,24 @@ Server-side anti-cheat **[verified by behaviour]**:
 allowed = floor((now - enrolled_at) / 1000) + 10
 ```
 
-A `timestamp` may never exceed `allowed`. Practical loop (1 s sleep, +7 s per beat):
+A `timestamp` may never exceed `allowed`. Practical loop (1 s tick, +5 s per beat):
 
 ```
 while timestamp < target:
-    if allowed - secondsDone >= 7:
-        POST { timestamp: min(target, secondsDone + 7 + random()) }
-    secondsDone = min(target, secondsDone + 7)
+    allowed = min(target, floor((now - enrolled_at) / 1000) + 10)
+    if allowed - secondsDone >= 5 or allowed == target:
+        POST { timestamp: min(allowed, secondsDone + 5) }
     sleep(1s)
 ```
 
 Result: a 900 s video quest takes ≈15 minutes of wall clock — the server's pacing
 is what makes it work, not the client.
+
+Because the pacing is per quest (it is measured from the quest's own
+`enrolled_at`), the quests of several accounts - and several quests of one
+account - can run **at the same time**: every quest is enrolled first and then
+advanced in parallel. The whole queue then needs as long as its slowest quest
+instead of the sum of all of them.
 
 ### 3.6 `POST /quests/{id}/claim-reward` **[verified]**
 
