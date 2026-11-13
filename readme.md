@@ -86,9 +86,17 @@ ENCRYPTION_KEY=some-long-random-string
 
 ### 4. Register the commands
 
-Slash commands are registered automatically on startup. For instant
-registration in one server, set `GUILD_ID`. Without it the commands are
-registered globally (Discord can take up to an hour to propagate).
+The bot registers the commands automatically on startup - **globally**, so
+every server the bot is in gets them, plus instantly in the guilds listed in
+`GUILD_ID`. The first global registration can take up to an hour to
+propagate; after that the bot answers from any server immediately.
+
+The command set IS the registry: a command that is removed from the code is
+also removed from Discord on the next redeploy, so stale commands never
+answer with "Unknown command." If you previously registered extra commands
+and are seeing "Unknown command." in other servers, the previous deploy
+left a stale global set behind — the next startup fixes it automatically
+(or run `!admin setup`).
 
 `!admin setup` shows the current setup and re-registers the commands.
 The bot requires the **Message Content** intent to read the prefix commands.
@@ -312,7 +320,7 @@ The scope is passed explicitly down to the services. There is no global
 | `DISCORD_REDIRECT_URI` | no | - | OAuth2 redirect target |
 | `OWNER_ID` | no | - | full admin access - several ids, comma separated |
 | `ADMIN_ROLE_ID` | no | - | role that may use the owner commands |
-| `GUILD_ID` | no | - | guild scoped command registration |
+| `GUILD_ID` | no | - | extra guilds that get instant command updates (global registration happens regardless) |
 | `DATABASE_PATH` | no | `data/quest-bot.sqlite` | SQLite file |
 | `QUEST_CATALOG_PATH` | no | `quest.json` | quest catalogue snapshot |
 | `LOG_LEVEL` | no | `INFO` | `DEBUG`/`INFO`/`WARN`/`ERROR` |
@@ -322,8 +330,9 @@ The scope is passed explicitly down to the services. There is no global
 | `USER_TOKEN` | no | - | a Discord **user** token for the operator - gives access to the live quests and the automation |
 | `WEBHOOK_URL` | no | - | webhook in the developer guild - receives every room event |
 
-> `GUILD_ID` accepts several ids (comma separated). Guild scoped commands appear
-> instantly, global ones can take up to an hour to propagate.
+> `GUILD_ID` accepts several ids (comma separated) and is optional - it only
+> buys instant command updates in those guilds. The bot always registers
+> globally, so every server the bot is in has the commands.
 >
 > `ENCRYPTION_KEY` is required. It encrypts every stored token. If it is
 > missing the bot refuses to start - there is no built-in fallback key,

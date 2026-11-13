@@ -37,6 +37,14 @@ export async function registerCommands(
 	const body = commands.map((command) => command.data.toJSON());
 	const applicationId = client.application?.id ?? config.clientId;
 
+	// Register globally, so every server the bot is invited to gets the
+	// commands - not only the guilds in GUILD_ID.
+	await client.rest.put(Routes.applicationCommands(applicationId), {
+		body,
+	});
+
+	// Guild scoped registration is instant, so the guilds in GUILD_ID are
+	// updated right away instead of waiting for the global rollout.
 	if (config.guildIds.length > 0) {
 		for (const guildId of config.guildIds) {
 			await client.rest.put(
@@ -44,13 +52,7 @@ export async function registerCommands(
 				{ body },
 			);
 		}
-
-		return body.length;
 	}
-
-	await client.rest.put(Routes.applicationCommands(applicationId), {
-		body,
-	});
 
 	return body.length;
 }
