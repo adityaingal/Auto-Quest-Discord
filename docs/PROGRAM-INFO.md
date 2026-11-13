@@ -94,7 +94,7 @@ export type AccountScope = {
 1. **A user can only reach their own data.** Rooms store tokens encrypted
    with `ENCRYPTION_KEY`. The scope filters every query.
 2. **The operator's accounts are visible to the operator only.** The
-   optional operator-level user token (`USER_TOKEN` / `/token add ... user`)
+   optional operator-level user token (`USER_TOKEN` / `!token add ... user`)
    is used exclusively when `scope.isOperator` is true.
 3. **The encryption key has NO default.** The bot refuses to start without
    `ENCRYPTION_KEY`. Never reintroduce a fallback key — a published default
@@ -154,8 +154,7 @@ Migrations live in `bot/database/index.ts`; they run at startup.
 
 ### Deleting data
 
-`/account unlink` (`accountService.unlink`) and the admin-only
-`/admin purge <user>` both call `repositories.purgeUser()`, which deletes
+`/account unlink` (`accountService.unlink`) and the owner-only prefix command `!admin purge <user>` both call `repositories.purgeUser()`, which deletes
 the user's: rooms, room_accounts, account_links, quest_progress,
 quest_history, reward_records, notification_settings and oauth_states.
 
@@ -173,7 +172,7 @@ Required: `DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID`, `ENCRYPTION_KEY`.
 | `DISCORD_CLIENT_SECRET` | no | — | Needed for `/account link` |
 | `DISCORD_REDIRECT_URI` | no | — | OAuth2 redirect target |
 | `OWNER_ID` | no | — | Comma separated ids — full admin access |
-| `ADMIN_ROLE_ID` | no | — | Role that may use `/admin` |
+| `ADMIN_ROLE_ID` | no | — | Role that may use the owner commands |
 | `GUILD_ID` | no | — | Guild-scoped registration (comma separated) |
 | `DATABASE_PATH` | no | `data/quest-bot.sqlite` | SQLite file |
 | `QUEST_CATALOG_PATH` | no | `quest.json` | Quest catalogue |
@@ -189,10 +188,10 @@ dev dependencies and the TypeScript build would fail).
 
 ---
 
-## 6. Complete slash command reference
+## 6. Command reference
 
-The bot has **7 command groups**. Every command works only in the scope of
-the invoking user; admin groups require the owner or the admin role.
+Public slash commands follow Discord scopes for every Discord user. The
+administrative commands are owner-only prefix commands (default prefix `!`).
 
 ### `/quest`
 
@@ -201,15 +200,13 @@ the invoking user; admin groups require the owner or the admin role.
 | `list [account]` | All available quests (dropdown + pagination) |
 | `info <quest> [account]` | Full details: tasks, requirements, rewards |
 | `start` | Eligibility check and the official enrolment route |
-| `auto <quest> [account]` | Complete one quest automatically |
-| `all [account]` | Complete all quests (all accounts in parallel); `stop:true` to stop the queue |
 | `sessions` | Show the accounts your rooms hold |
 | `switch <account>` | Choose the account the bot works with (`all` = every account) |
 | `progress` | Your recorded progress per quest |
 | `status <quest> [account]` | Status of one quest for your account |
 | `refresh` | Refresh the quest catalogue from the source |
 | `history` | Your recent quest activity |
-| `panel [account]` | **Main interactive interface** — banner image, reward, progress bar, full Quest dropdown with pagination, action buttons |
+| `panel [account]` | **Main interactive interface** - banner image, reward, progress bar, full Quest dropdown with pagination, action buttons |
 | `access` | Connect/manage your own account via OAuth2; disconnect button |
 | `select <quest>` | Open the panel for a specific quest |
 | `search <name>` | Search the quests by name |
@@ -243,45 +240,49 @@ the invoking user; admin groups require the owner or the admin role.
 | `claim <quest>` | Start the official claim flow (human captcha when Discord asks) |
 | `code <quest>` | Fetch a claimed reward code |
 
-### `/room`
+### Room prefix commands (owner only)
 
-| Subcommand | Purpose |
+| Prefix command | Purpose |
 | --- | --- |
-| `create <name> [description]` | Create a private room |
-| `search <name>` | Find your rooms by name |
-| `list` | List your rooms |
-| `add <room> <token>` | Add a user token to a room (anonymises it; encrypted; slot 1, 2, 3...) |
-| `remove <room> <slot>` | Remove an account; close the gap in the sequence |
-| `delete <room>` | Delete a room and every account in it |
-| `renew <room>` | Reset the 30 day timer |
+| `!room create <name> [description]` | Create a room |
+| `!room search <name>` | Find a room |
+| `!room list` | List rooms |
+| `!room add <room> <token>` | Add a user token to a room |
+| `!room remove <room> <slot>` | Remove an account |
+| `!room delete <room>` | Delete a room and its accounts |
+| `!room renew <room>` | Reset the 30 day timer |
 
-### `/token` (owner / admin only)
+### Token prefix commands (owner only)
 
-| Subcommand | Purpose |
+| Prefix command | Purpose |
 | --- | --- |
-| `list [type]` | Every stored token, masked (bot or user) |
-| `add <label> <token> <type>` | Register a bot or user token |
-| `import [label]` | Register `USER_TOKEN` as an account |
-| `remove <id>` | Delete a stored token |
-| `check <id>` | Validate a stored token against Discord |
+| `!token list [type]` | Every stored token, masked (bot or user) |
+| `!token add <label> <token> <type>` | Register a bot or user token |
+| `!token import [label]` | Register USER_TOKEN as an account |
+| `!token remove <id>` | Delete a stored token |
+| `!token check <id>` | Validate a token against Discord |
 
-### `/admin` (owner / admin only)
+### Admin prefix commands (owner only)
 
-| Subcommand | Purpose |
+| Prefix command | Purpose |
 | --- | --- |
-| `setup` | Setup status + re-register slash commands |
-| `stats` | Usage statistics |
-| `users` | Known users |
-| `logs` | Admin audit log |
-| `reload` | Reload catalogue/config |
-| `backup` | Create a database backup |
-| `restore <file>` | Restore a backup |
-| `maintenance` | Toggle maintenance mode |
-| `config <key> <value>` | Read/write configuration values |
-| `purge <user>` | Delete every piece of data of a user |
-| `whitelist list/add/remove/enable/disable/sync` | Manage the whitelist; `role` changes member/admin access |
-
----
+| `!admin setup` | Setup status + re-register slash commands |
+| `!admin stats` | Usage statistics |
+| `!admin users` | Known users |
+| `!admin logs` | Admin audit log |
+| `!admin reload` | Reload catalogue/config |
+| `!admin backup` | Create a database backup |
+| `!admin restore <file>` | Restore a backup |
+| `!admin maintenance` | Toggle maintenance mode |
+| `!admin config <key> <value>` | Read/write configuration values |
+| `!admin purge <user>` | Delete every piece of data of a user |
+| `!whitelist list` | The whitelisted servers and users |
+| `!whitelist add <guild|user> <id> [member|admin]` | Allow a server or a user |
+| `!whitelist remove <guild|user> <id>` | Remove it |
+| `!whitelist enable` / `!whitelist disable` | Turn the restriction on or off |
+| `!whitelist sync` | Add every server the bot is in to the whitelist |
+| `!quest auto <quest>` | Complete one quest with the operator accounts |
+| `!quest all [stop]` | Complete every quest with the operator accounts |
 
 ## 7. The quest panel UI
 
@@ -358,7 +359,7 @@ a room alive.
 `bot/commands/registry.ts` registers the command groups with
 `Routes.applicationGuildCommands` (when `GUILD_ID` is set) or
 `Routes.applicationCommands` (global). Registration happens on startup;
-`/admin setup` re-registers.
+`!admin setup` re-registers.
 
 ### Component interactions
 
@@ -386,7 +387,7 @@ accepted. The webhook is not configurable by end users.
 ### Tests
 
 ```bash
-npm run test       # node:test suite (100 tests)
+npm run test       # node:test suite (101 tests)
 npm run typecheck  # tsc --noEmit
 npm run build      # compile to dist/
 ```

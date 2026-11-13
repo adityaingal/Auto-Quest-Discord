@@ -19,7 +19,7 @@
 
 | | |
 | --- | --- |
-| 🧩 **Slash commands only** | 7 command groups, no prefix commands |
+| 🧩 **Command surface** | 4 public slash command groups + owner-only prefix commands (`!`) |
 | 🔎 **Quest intelligence** | task types, requirements, platforms, rewards, eligibility |
 | 🏠 **Private rooms** | every user owns their rooms and their accounts - nobody else sees them |
 | 🔗 **Developer webhook** | all room events are mirrored to one webhook (configured with `WEBHOOK_URL`) |
@@ -59,8 +59,10 @@ npm start
    (local development: `http://localhost:3000/oauth/callback`)
 5. **OAuth2 -> URL Configuration** -> copy the **Client Secret** into
    `DISCORD_CLIENT_SECRET`
-6. **Bot -> Privileged Gateway Intents** -> leave everything **off**. The bot
-   only needs the `Guilds` intent and never reads messages.
+6. **Bot -> Privileged Gateway Intents** -> enable **Message Content
+   Intent**. The bot reads the owner-only prefix commands (for example
+   `!admin stats`) from regular channels - the public commands are slash
+   commands and do not read message content.
 
 ### 2. Configure
 
@@ -88,7 +90,11 @@ Slash commands are registered automatically on startup. For instant
 registration in one server, set `GUILD_ID`. Without it the commands are
 registered globally (Discord can take up to an hour to propagate).
 
-`/admin setup` shows the current setup and re-registers the commands.
+`!admin setup` shows the current setup and re-registers the commands.
+The bot requires the **Message Content** intent to read the prefix commands.
+Enable it in the Developer Portal under **Bot -> Privileged Gateway Intents
+-> Message Content Intent**, otherwise the prefix commands are silently
+ignored.
 
 ---
 
@@ -118,6 +124,11 @@ Run `/quest panel` (or `/quest access` first to link your account):
 
 ## Command reference
 
+**Public commands** are slash commands and can be used by everyone.
+**Owner commands** use the prefix (default `!`) and only work for the ids
+listed in `OWNER_ID` - they never appear in the command picker and can only
+be run by the bot owner.
+
 ### `/quest`
 
 | Subcommand | Description |
@@ -130,9 +141,6 @@ Run `/quest panel` (or `/quest access` first to link your account):
 | `/quest list [account]` | All available quests with id, application and eligibility (dropdown + pagination) |
 | `/quest info <quest> [account]` | Full details: task types, requirements, platform, rewards |
 | `/quest start` | Eligibility check and the official enrolment route (confirmation buttons) |
-| `/quest auto <quest> [account]` | Complete one quest with your account |
-| `/quest all [account]` | Complete every available quest - **all accounts start at the same time** |
-| `/quest all stop` | Stop the running queue after the current quest |
 | `/quest sessions` | Your accounts - no token is shown |
 | `/quest switch <account>` | Choose the account the bot works with (`all` uses every account) |
 | `/quest progress` | Recorded progress with progress bars |
@@ -140,24 +148,62 @@ Run `/quest panel` (or `/quest access` first to link your account):
 | `/quest refresh` | Refresh the quest information and store it |
 | `/quest history` | Your recent quest activity |
 
-### `/room`
 
-A room is your own container for accounts. Only you can see it.
+### Rooms (owner only, prefix)
 
-| Subcommand | Description |
+A room is your own container for accounts. Only the owner of the bot can
+manage rooms - the slash commands were removed to keep the public surface
+small.
+
+| Prefix command | Description |
 | --- | --- |
-| `/room create <name> [description]` | Create a room. It is reset automatically after 30 days |
-| `/room search <name>` | Find your rooms by name and see their accounts |
-| `/room list` | List every room you own |
-| `/room add <room> <token>` | Add an account to a room - it gets the next free slot |
-| `/room remove <room> <slot>` | Remove an account - the remaining slots are closed up |
-| `/room delete <room>` | Delete a room with every account in it |
-| `/room renew <room>` | Reset the 30 day timer of a room |
+| `!room create <name> [description]` | Create a room. It is reset automatically after 30 days |
+| `!room search <name>` | Find a room by name |
+| `!room list` | List the rooms |
+| `!room add <room> <token>` | Add an account to a room - it gets the next free slot |
+| `!room remove <room> <slot>` | Remove an account - the remaining slots are closed up |
+| `!room delete <room>` | Delete a room and every account in it |
+| `!room renew <room>` | Reset the 30 day timer of a room |
 
 The slots of a room are a continuous sequence: `1, 2, 3, ...`. When you
 remove the account in slot 2, the account that was in slot 3 moves to slot 2
 and the next account you add gets slot 3. There is never a hole in the
 sequence.
+
+### Owner commands (prefix, restricted to `OWNER_ID`)
+
+All of these run with the configured prefix (default `!`). They are not
+slash commands, are never shown in the command picker, and respond to any
+Discord user with an `OPERATION NOT ALLOWED` error unless the user is
+listed in `OWNER_ID`.
+
+| Prefix command | Description |
+| --- | --- |
+| `!token list [bot|user]` | Every stored token, masked |
+| `!token add <label> <token> <bot|user>` | Register a token - `bot` for an extra bot account, `user` for a user token |
+| `!token import [label]` | Register the `USER_TOKEN` environment variable as an account |
+| `!token remove <id>` | Delete a stored token |
+| `!token check <id>` | Validate a token against Discord |
+| `!admin setup` | Setup status and command registration |
+| `!admin stats` | Usage statistics |
+| `!admin users` | Known users |
+| `!admin logs` | Admin audit log |
+| `!admin reload` | Reload the catalogue and configuration |
+| `!admin backup` | Write a database backup |
+| `!admin restore <file>` | Restore a backup |
+| `!admin maintenance` | Toggle maintenance mode |
+| `!admin config <key> <value>` | Write a configuration value |
+| `!admin purge <user>` | Delete every piece of data of a user |
+| `!whitelist list` | The whitelisted servers and users |
+| `!whitelist add guild\|user <id> [label] [member\|admin]` | Allow a server or a user |
+| `!whitelist remove guild\|user <id>` | Remove it |
+| `!whitelist role guild\|user <id> member\|admin` | Change the access role |
+| `!whitelist enable` / `disable` | Turn the restriction on or off (off by default) |
+| `!whitelist sync` | Add every server the bot is in to the whitelist |
+| `!quest auto <quest>` | Complete one quest with the operator accounts |
+| `!quest all` | Complete every quest with the operator accounts |
+| `!quest stop` | Stop the running queue |
+| `!help` | Show the list of owner commands |
 
 ### Developer webhook
 
@@ -199,42 +245,6 @@ is not available to the users of the bot.
 | `/reward status` | Eligibility and claim status |
 | `/reward claim` | Start the official claim flow (human captcha when Discord asks) |
 | `/reward code` | Fetch a claimed reward code through the Discord API |
-
-### `/token` (owner or admin role)
-
-| Subcommand | Description |
-| --- | --- |
-| `/token list [type]` | Every stored token - `bot`, `user` or all (masked, never in full) |
-| `/token add <label> <token> <type>` | Register a **bot** token (extra bot instance) or a **user** token (quests) |
-| `/token import [label]` | Register the `USER_TOKEN` environment variable as an account |
-| `/token remove <id>` | Delete a stored token |
-| `/token check <id>` | Validate a stored token against Discord |
-
-### `/admin` (owner or admin role)
-
-| Subcommand | Description |
-| --- | --- |
-| `/admin setup` | Setup status, user sessions and command registration |
-| `/admin stats` | Usage statistics |
-| `/admin users` | Known users |
-| `/admin logs` | Admin audit log |
-| `/admin reload` | Reload the catalogue and the configuration |
-| `/admin backup` | Write a database backup |
-| `/admin restore` | Restore a backup (autocomplete over the backup files) |
-| `/admin maintenance` | Toggle maintenance mode (confirmation button) |
-| `/admin config` | Read and write configuration values |
-| `/admin purge <user>` | Delete every piece of data of a user |
-
-### `/admin whitelist` (owner or admin role)
-
-| Subcommand | Description |
-| --- | --- |
-| `/admin whitelist list` | The whitelisted servers and users |
-| `/admin whitelist add guild\|user <id>` | Allow a server or a user |
-| `/admin whitelist remove guild\|user <id>` | Remove it |
-| `/admin whitelist enable` / `disable` | Turn the restriction on or off (off by default) |
-| `/admin whitelist sync` | Add every server the bot is in |
-
 
 ---
 
@@ -301,7 +311,7 @@ The scope is passed explicitly down to the services. There is no global
 | `DISCORD_CLIENT_SECRET` | no | - | needed for `/account link` |
 | `DISCORD_REDIRECT_URI` | no | - | OAuth2 redirect target |
 | `OWNER_ID` | no | - | full admin access - several ids, comma separated |
-| `ADMIN_ROLE_ID` | no | - | role that may use `/admin` |
+| `ADMIN_ROLE_ID` | no | - | role that may use the owner commands |
 | `GUILD_ID` | no | - | guild scoped command registration |
 | `DATABASE_PATH` | no | `data/quest-bot.sqlite` | SQLite file |
 | `QUEST_CATALOG_PATH` | no | `quest.json` | quest catalogue snapshot |
@@ -321,8 +331,8 @@ The scope is passed explicitly down to the services. There is no global
 > The same key has to be used on every instance, so a token that was stored on
 > one instance stays readable on the others.
 >
-> `USER_TOKEN` enables `/quest auto` and `/quest all` for the **operator**.
-> Regular users add their own accounts with `/room add`.
+> `USER_TOKEN` enables the automation commands for the **operator**.
+> Regular users add their own accounts with `!room add`.
 
 ---
 
@@ -352,9 +362,9 @@ The scope is passed explicitly down to the services. There is no global
 
 The quest endpoints are user-session endpoints, so the bot needs a user token:
 
-* every user adds their own with `/room add <room> <token>`, or
+* the owner adds accounts with `!room add <room> <token>`, or
 * the operator sets `USER_TOKEN=<token>` in the environment, or
-* the operator uses `/token add main <token> user` (stored encrypted).
+* the operator uses `!token add main <token> user` (stored encrypted).
 
 The same `ENCRYPTION_KEY` has to be used on every instance, so a token
 registered on one instance stays readable on the others.
@@ -426,14 +436,14 @@ the UI helpers.
   `/quest refresh` to update the stored copy.
 * A user token can only drive one session at a time - a second session with the
   same token invalidates the first one.
-* **Using a user token violates Discord's terms of service.** `/room add`
+* **Using a user token violates Discord's terms of service.** `!room add`
   asks for one, so that the bot can read the live quests of that account and
   run the automation for it. Use it at your own risk - a user token that
   automates a Discord account can get that account disabled. The token is
   encrypted at rest, is never shown in full and is never sent to a webhook.
 * A room is reset after 30 days. The accounts in it are deleted with it.
 * The whitelist is **off** by default, so anybody can use the bot. Turn it on
-  with `/admin whitelist enable` if you want to limit it to certain servers
+  with `!whitelist enable` if you want to limit it to certain servers
   or users.
 
 ---

@@ -68,26 +68,21 @@ function services() {
 	};
 }
 
-test('all seven command groups are registered', () => {
+test('all four public command groups are registered', () => {
 	assert.deepEqual(commandNames.sort(), [
 		'account',
-		'admin',
 		'quest',
 		'reward',
-		'room',
 		'task',
-		'token',
 	]);
 });
 
-test('every command group exposes the documented subcommands', () => {
+test('every public command group exposes the documented subcommands', () => {
 	const expected: Record<string, string[]> = {
 		quest: [
 			'list',
 			'info',
 			'start',
-			'auto',
-			'all',
 			'sessions',
 			'progress',
 			'status',
@@ -103,28 +98,6 @@ test('every command group exposes the documented subcommands', () => {
 		account: ['link', 'status', 'unlink', 'privacy'],
 		task: ['list', 'info', 'progress', 'verify'],
 		reward: ['list', 'info', 'status', 'claim', 'code'],
-		admin: [
-			'setup',
-			'stats',
-			'users',
-			'logs',
-			'reload',
-			'backup',
-			'restore',
-			'maintenance',
-			'config',
-			'purge',
-		],
-		token: ['list', 'add', 'import', 'remove', 'check'],
-		room: [
-			'create',
-			'search',
-			'list',
-			'add',
-			'remove',
-			'delete',
-			'renew',
-		],
 	};
 
 	for (const command of commands) {
@@ -141,6 +114,12 @@ test('every command group exposes the documented subcommands', () => {
 			`${command.data.name} subcommands`,
 		);
 	}
+});
+
+test('neither the admin nor the token commands are public', () => {
+	assert.ok(!commandNames.includes('admin'));
+	assert.ok(!commandNames.includes('token'));
+	assert.ok(!commandNames.includes('room'));
 });
 
 test('the catalogue provider lists quests from quest.json', async () => {

@@ -17,6 +17,7 @@ import { isAdmin } from './commands/admin';
 import { roomAutocomplete } from './commands/room';
 import { toUserMessage, AppError } from './utils/errors';
 import { startHttpServer } from './httpServer';
+import { handlePrefixCommand } from './commands/prefix';
 
 /**
  * Whether the user may reach the operator level data. The check is done
@@ -36,7 +37,11 @@ async function main(): Promise<void> {
 	Logger.info('Starting Discord Quest Completer bot...');
 
 	const client = new Client({
-		intents: [GatewayIntentBits.Guilds],
+		intents: [
+			GatewayIntentBits.Guilds,
+			GatewayIntentBits.GuildMessages,
+			GatewayIntentBits.MessageContent,
+		],
 	});
 
 	const services = createServices(config, client);
@@ -44,6 +49,21 @@ async function main(): Promise<void> {
 
 	const router = new InteractionRouter(services);
 	const clients: Client[] = [client];
+
+	/**
+	 * The owner only prefix commands. They are not slash commands because
+	 * they are for the owner alone, and the owner can fire a batch of them
+	 * without going through the command picker.
+	 */
+	client.on('messageCreate', async (message) => {
+		try {
+			await handlePrefixCommand(message, services);
+		} catch (error) {
+			Logger.error(
+				`Prefix command failed: ${(error as Error).message}`,
+			);
+		}
+	});
 
 	/**
 	 * Every bot instance (the primary one plus the additional tokens from

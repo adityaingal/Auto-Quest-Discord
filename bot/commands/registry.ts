@@ -6,18 +6,17 @@ import { questCommand } from './quest';
 import { accountCommand } from './account';
 import { taskCommand } from './task';
 import { rewardCommand } from './reward';
-import { adminCommand } from './admin';
-import { tokenCommand } from './token';
-import { roomCommand } from './room';
 
+/**
+ * The public commands. Everything that changes data on the bot belongs to
+ * the owner and runs as a prefix command instead (see ./prefix.ts) - the
+ * users only ever see the commands that act on their own account.
+ */
 export const commands: CommandDefinition[] = [
 	questCommand,
 	accountCommand,
 	taskCommand,
 	rewardCommand,
-	adminCommand,
-	tokenCommand,
-	roomCommand,
 ];
 
 export const commandNames = commands.map((command) => command.data.name);
