@@ -141,3 +141,6 @@ dist/
 
 # Multi account credentials
 accounts.json
+
+# Runtime database
+data/
