@@ -16,6 +16,7 @@ const OPTIONAL = [
 	'LOG_LEVEL',
 	'NOTIFICATION_INTERVAL_MINUTES',
 	'PORT',
+	'WEBHOOK_URL',
 ];
 
 const raw = require('node:fs')

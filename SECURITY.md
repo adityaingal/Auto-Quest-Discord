@@ -62,9 +62,9 @@ token.
 
 ### The bot is not an HTTP proxy
 
-`bot/integrations/webhook.ts` only accepts `discord.com` webhook URLs. Keep
-the host allowlist tight. Never fetch a URL that a user supplied without
-checking the host.
+`bot/integrations/webhook.ts` only accepts `discord.com` webhook URLs, and
+the webhook URL comes from the environment (`WEBHOOK_URL`), never from a
+user. Keep the host allowlist tight.
 
 ### The whitelist covers every interaction
 

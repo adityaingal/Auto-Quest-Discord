@@ -5,8 +5,8 @@
 > slash commands.
 >
 > Every user gets their own **rooms** for the accounts they want to work
-> with. A room is private to the user who created it, and it can be mirrored
-> to another server with a webhook.
+> with. A room is private to the user who created it. The developer guild can
+> receive every room event through one webhook configured with `WEBHOOK_URL`.
 >
 > This is the 2.0 rewrite of the original selfbot. The quest engine and the
 > configuration parser were kept; the user-token automation was replaced by
@@ -22,7 +22,7 @@
 | 🧩 **Slash commands only** | 7 command groups, no prefix commands |
 | 🔎 **Quest intelligence** | task types, requirements, platforms, rewards, eligibility |
 | 🏠 **Private rooms** | every user owns their rooms and their accounts - nobody else sees them |
-| 🔗 **Webhooks** | a room can post its changes to a webhook in another server |
+| 🔗 **Developer webhook** | all room events are mirrored to one webhook (configured with `WEBHOOK_URL`) |
 | 🗄️ **SQLite persistence** | versioned migrations, progress history, admin audit log |
 | 🔔 **Notifications** | new quests, progress, completion, reward and expiry events |
 | 🎨 **Rich UI** | embeds, progress bars, dropdowns, pagination, confirmation buttons |
@@ -117,24 +117,31 @@ A room is your own container for accounts. Only you can see it.
 
 | Subcommand | Description |
 | --- | --- |
-| `/room create <name> [description] [webhook]` | Create a room. It is reset automatically after 30 days |
+| `/room create <name> [description]` | Create a room. It is reset automatically after 30 days |
 | `/room search <name>` | Find your rooms by name and see their accounts |
 | `/room list` | List every room you own |
 | `/room add <room> <token>` | Add an account to a room - it gets the next free slot |
 | `/room remove <room> <slot>` | Remove an account - the remaining slots are closed up |
 | `/room delete <room>` | Delete a room with every account in it |
 | `/room renew <room>` | Reset the 30 day timer of a room |
-| `/room webhook <room> <url>` | Post every change of a room to a Discord webhook |
-| `/room webhook-clear <room>` | Stop posting to the webhook |
 
 The slots of a room are a continuous sequence: `1, 2, 3, ...`. When you
 remove the account in slot 2, the account that was in slot 3 moves to slot 2
 and the next account you add gets slot 3. There is never a hole in the
 sequence.
 
-A webhook posts the **room name**, the **account** and the **event**. The
-token itself is never sent - a webhook usually points at a channel that
-other people can read.
+### Developer webhook
+
+Set `WEBHOOK_URL` to a webhook URL in the guild you use to watch the bot and
+every room event is posted there:
+
+- room created
+- account added
+- account removed
+
+The message carries the **room name**, the **account** and the **event** - it
+never carries the token. The webhook is configured once by the developer and
+is not available to the users of the bot.
 
 ### `/account`
 
@@ -274,6 +281,7 @@ The scope is passed explicitly down to the services. There is no global
 | `PORT` | no | `3000` | HTTP port for `/health` and the OAuth2 callback |
 | `NOTIFY_CHANNEL_ID` | no | - | channel that receives the status messages |
 | `USER_TOKEN` | no | - | a Discord **user** token for the operator - gives access to the live quests and the automation |
+| `WEBHOOK_URL` | no | - | webhook in the developer guild - receives every room event |
 
 > `GUILD_ID` accepts several ids (comma separated). Guild scoped commands appear
 > instantly, global ones can take up to an hour to propagate.

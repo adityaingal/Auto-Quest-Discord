@@ -52,9 +52,6 @@ export type RoomRow = {
 	owner_user_id: string;
 	name: string;
 	description: string | null;
-	webhook_id: string | null;
-	webhook_token: string | null;
-	webhook_reveal: number;
 	created_at: string;
 	updated_at: string;
 	expires_at: string;
@@ -803,9 +800,6 @@ export class Repositories {
 		fields: {
 			name?: string;
 			description?: string | null;
-			webhook_id?: string | null;
-			webhook_token?: string | null;
-			webhook_reveal?: number;
 			expires_at?: string;
 		},
 	): void {
@@ -820,21 +814,6 @@ export class Repositories {
 		if (fields.description !== undefined) {
 			sets.push('description = ?');
 			params.push(fields.description);
-		}
-
-		if (fields.webhook_id !== undefined) {
-			sets.push('webhook_id = ?');
-			params.push(fields.webhook_id);
-		}
-
-		if (fields.webhook_token !== undefined) {
-			sets.push('webhook_token = ?');
-			params.push(fields.webhook_token);
-		}
-
-		if (fields.webhook_reveal !== undefined) {
-			sets.push('webhook_reveal = ?');
-			params.push(fields.webhook_reveal);
 		}
 
 		if (fields.expires_at !== undefined) {

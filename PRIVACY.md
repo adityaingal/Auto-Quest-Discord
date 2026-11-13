@@ -18,7 +18,6 @@ Discord account that triggered the storage:
 | An OAuth2 access token and refresh token | So the bot can read the quests of your linked account | Encrypted with AES-256-GCM |
 | Quest progress, reward status, command history | So `/quest progress` and `/quest history` can show your own history | Plain text |
 | Rooms you create, and the accounts inside them | Rooms are your private containers for accounts | Encrypted with AES-256-GCM |
-| A Discord webhook id and token | If you set a webhook on a room, so the bot can post there | Encrypted with AES-256-GCM |
 
 ## What is never stored
 
@@ -28,7 +27,6 @@ Discord account that triggered the storage:
   written to disk and it is never displayed or logged.
 - The full token in a webhook message. A webhook post contains the room
   name, the account name and the event - never the token itself.
-
 ## Who can see your data
 
 - **You.** A room belongs to the account that created it. No other user can
@@ -64,9 +62,10 @@ After `/account unlink` there is nothing left of you in the database.
 - **Discord.** The bot talks to the Discord API to read quests, to send
   notifications and to post to webhooks. Discord receives whatever the bot
   sends, including the commands you run.
-- **The webhook owner.** If you set a webhook on a room, the messages the
-  bot posts there are visible to whoever can read that channel. Choose a
-  channel only you can read if that matters to you.
+- **The developer.** If the operator set `WEBHOOK_URL`, the bot posts the
+  room events (room created, account added, account removed) to the
+  configured channel - room name, account name and event type. No token is
+  sent. That channel is visible to whoever can read it.
 
 ## Hosting
 

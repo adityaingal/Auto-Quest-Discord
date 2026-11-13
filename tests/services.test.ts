@@ -119,8 +119,6 @@ test('every command group exposes the documented subcommands', () => {
 			'remove',
 			'delete',
 			'renew',
-			'webhook',
-			'webhook-clear',
 		],
 	};
 

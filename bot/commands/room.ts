@@ -43,13 +43,6 @@ function roomEmbed(room: Room): ReturnType<typeof infoEmbed> {
 			value: room.expiresAt,
 			inline: true,
 		},
-		{
-			name: 'Webhook',
-			value: room.hasWebhook
-				? 'active - every change is posted there'
-				: 'none - set one with `/room webhook`',
-			inline: true,
-		},
 	];
 
 	return infoEmbed(
@@ -87,41 +80,17 @@ export const roomCommand = group(
 						.setDescription('What the room is for')
 						.setRequired(false),
 				);
-				sub.addStringOption((option) =>
-					option
-						.setName('webhook')
-						.setDescription(
-							'A Discord webhook that receives every change of this room',
-						)
-						.setRequired(false),
-				);
 			},
 			run: async (context: CommandContext) => {
 				const { interaction, services, scope } = context;
 				const name = interaction.options.getString('name', true);
 				const description =
 					interaction.options.getString('description') ?? null;
-				const webhook = interaction.options.getString('webhook');
 
-				const room = services.roomService.create(
+				const room = await services.roomService.create(
 					scope.userId,
 					name,
 					description,
-				);
-
-				// The webhook has to exist before the first event is sent.
-				if (webhook) {
-					services.roomService.setWebhook(
-						scope.userId,
-						room.name,
-						webhook,
-						false,
-					);
-				}
-
-				const updated = services.roomService.require(
-					scope.userId,
-					room.name,
 				);
 
 				await interaction.reply({
@@ -135,8 +104,6 @@ export const roomCommand = group(
 					],
 					flags: MessageFlags.Ephemeral,
 				});
-
-				await services.roomService.notify(updated, 'room_created');
 			},
 		},
 		{
@@ -221,9 +188,7 @@ export const roomCommand = group(
 				const lines = rooms
 					.map(
 						(room) =>
-							`**${room.name}** - ${room.accounts.length} account(s)${
-								room.hasWebhook ? ' - webhook active' : ''
-							}\n` +
+							`**${room.name}** - ${room.accounts.length} account(s)\n` +
 							`created ${room.createdAt} - resets ${new Date(
 								room.expiresAt,
 							).toUTCString()}`,
@@ -354,64 +319,6 @@ export const roomCommand = group(
 							`The room **${room.name}** now resets on **${new Date(
 								room.expiresAt,
 							).toUTCString()}**.`,
-						),
-					],
-					flags: MessageFlags.Ephemeral,
-				});
-			},
-		},
-		{
-			name: 'webhook',
-			description:
-				'Post every change of a room to a Discord webhook (it may live in another server).',
-			build: (sub) => {
-				roomNameOption(sub);
-				sub.addStringOption((option) =>
-					option
-						.setName('url')
-						.setDescription('The Discord webhook URL')
-						.setRequired(true),
-				);
-			},
-			run: async (context: CommandContext) => {
-				const { interaction, services, scope } = context;
-				const roomName = interaction.options.getString('room', true);
-				const url = interaction.options.getString('url', true);
-
-				const { room } = services.roomService.setWebhook(
-					scope.userId,
-					roomName,
-					url,
-					false,
-				);
-
-				await interaction.reply({
-					embeds: [
-						successEmbed(
-							`The room **${room.name}** now posts every change to the webhook.\n` +
-								'The room name, the account and the event are sent - the token itself is never sent.',
-						),
-					],
-					flags: MessageFlags.Ephemeral,
-				});
-			},
-		},
-		{
-			name: 'webhook-clear',
-			description: 'Stop posting the changes of a room to its webhook.',
-			build: roomNameOption,
-			run: async (context: CommandContext) => {
-				const { interaction, services, scope } = context;
-				const roomName = interaction.options.getString('room', true);
-				const room = services.roomService.clearWebhook(
-					scope.userId,
-					roomName,
-				);
-
-				await interaction.reply({
-					embeds: [
-						successEmbed(
-							`The room **${room.name}** does not post to a webhook any more.`,
 						),
 					],
 					flags: MessageFlags.Ephemeral,

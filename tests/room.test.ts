@@ -4,7 +4,7 @@ import { Database } from '../bot/database';
 import { Repositories } from '../bot/database/repositories';
 import { TokenVault } from '../bot/utils/crypto';
 import { RoomService } from '../bot/services/roomService';
-import { parseWebhookUrl } from '../bot/integrations/webhook';
+import { DiscordWebhook, parseWebhookUrl } from '../bot/integrations/webhook';
 import { NotFoundError, ValidationError } from '../bot/utils/errors';
 
 function setup() {
@@ -17,6 +17,21 @@ function setup() {
 	return { db, repositories, vault, service };
 }
 
+function setupWithWebhook(target: { id: string; token: string }) {
+	const db = new Database(':memory:');
+	db.migrate();
+	const repositories = new Repositories(db);
+	const vault = new TokenVault(Buffer.alloc(32, 5));
+	const service = new RoomService(
+		repositories,
+		vault,
+		new DiscordWebhook(),
+		target,
+	);
+
+	return { db, repositories, vault, service };
+}
+
 /** A validator that accepts every token and reports a fixed account. */
 const accept = async (token: string) => ({
 	valid: true,
@@ -25,16 +40,15 @@ const accept = async (token: string) => ({
 	message: 'ok',
 });
 
-test('a room is created for its owner', () => {
+test('a room is created for its owner', async () => {
 	const { db, service } = setup();
 
-	const room = service.create('user-1', 'My Accounts', 'the main ones');
+	const room = await service.create('user-1', 'My Accounts', 'the main ones');
 
 	assert.equal(room.name, 'My Accounts');
 	assert.equal(room.ownerUserId, 'user-1');
 	assert.equal(room.description, 'the main ones');
 	assert.equal(room.accounts.length, 0);
-	assert.equal(room.hasWebhook, false);
 
 	// The room has a 30 day lifetime.
 	const days = Math.round(
@@ -46,34 +60,34 @@ test('a room is created for its owner', () => {
 	db.close();
 });
 
-test('a room name has to be valid', () => {
+test('a room name has to be valid', async () => {
 	const { db, service } = setup();
 
-	assert.throws(() => service.create('user-1', ''), ValidationError);
-	assert.throws(() => service.create('user-1', 'a/b'), ValidationError);
-	assert.throws(() => service.create('user-1', 'x'.repeat(50)), ValidationError);
+	assert.rejects(() => service.create('user-1', ''), ValidationError);
+	assert.rejects(() => service.create('user-1', 'a/b'), ValidationError);
+	assert.rejects(() => service.create('user-1', 'x'.repeat(50)), ValidationError);
 
 	db.close();
 });
 
-test('a user cannot have two rooms with the same name', () => {
+test('a user cannot have two rooms with the same name', async () => {
 	const { db, service } = setup();
 
-	service.create('user-1', 'Main');
+	await service.create('user-1', 'Main');
 
-	assert.throws(() => service.create('user-1', 'Main'), ValidationError);
+	assert.rejects(() => service.create('user-1', 'Main'), ValidationError);
 
 	// Another user may use the same name - the rooms are separate.
-	const other = service.create('user-2', 'Main');
+	const other = await service.create('user-2', 'Main');
 	assert.equal(other.ownerUserId, 'user-2');
 
 	db.close();
 });
 
-test('a room of another user is not found', () => {
+test('a room of another user is not found', async () => {
 	const { db, service } = setup();
 
-	service.create('user-1', 'Main');
+	await service.create('user-1', 'Main');
 
 	assert.throws(() => service.require('user-2', 'Main'), NotFoundError);
 	assert.equal(service.list('user-2').length, 0);
@@ -85,7 +99,7 @@ test('a room of another user is not found', () => {
 test('the accounts of a room are numbered without a gap', async () => {
 	const { db, service } = setup();
 
-	service.create('user-1', 'Main');
+	await service.create('user-1', 'Main');
 
 	const first = await service.addAccount(
 		'user-1',
@@ -116,7 +130,7 @@ test('the accounts of a room are numbered without a gap', async () => {
 test('removing an account closes the gap in the sequence', async () => {
 	const { db, service } = setup();
 
-	service.create('user-1', 'Main');
+	await service.create('user-1', 'Main');
 
 	await service.addAccount('user-1', 'Main', 'token-one', accept);
 	await service.addAccount('user-1', 'Main', 'token-two', accept);
@@ -151,8 +165,8 @@ test('removing an account closes the gap in the sequence', async () => {
 test('the account of another room is not removed', async () => {
 	const { db, service } = setup();
 
-	service.create('user-1', 'First');
-	service.create('user-1', 'Second');
+	await service.create('user-1', 'First');
+	await service.create('user-1', 'Second');
 
 	await service.addAccount('user-1', 'First', 'token-one', accept);
 	await service.addAccount('user-1', 'Second', 'token-two', accept);
@@ -169,7 +183,7 @@ test('the account of another room is not removed', async () => {
 test('the token of an account is never shown in full', async () => {
 	const { db, service } = setup();
 
-	service.create('user-1', 'Main');
+	await service.create('user-1', 'Main');
 
 	const account = await service.addAccount(
 		'user-1',
@@ -193,7 +207,7 @@ test('the token of an account is never shown in full', async () => {
 test('an invalid token is refused', async () => {
 	const { db, service } = setup();
 
-	service.create('user-1', 'Main');
+	await service.create('user-1', 'Main');
 
 	await assert.rejects(
 		() =>
@@ -212,12 +226,12 @@ test('an invalid token is refused', async () => {
 	db.close();
 });
 
-test('a room is searched by name', () => {
+test('a room is searched by name', async () => {
 	const { db, service } = setup();
 
-	service.create('user-1', 'Main Accounts');
-	service.create('user-1', 'Secondary');
-	service.create('user-2', 'Main Accounts');
+	await service.create('user-1', 'Main Accounts');
+	await service.create('user-1', 'Secondary');
+	await service.create('user-2', 'Main Accounts');
 
 	const found = service.find('user-1', 'main');
 
@@ -231,7 +245,7 @@ test('a room is searched by name', () => {
 	db.close();
 });
 
-test('a webhook url is only accepted when it points at Discord', () => {
+test('a webhook url is only accepted when it points at Discord', async () => {
 	assert.equal(
 		parseWebhookUrl(
 			'https://discord.com/api/webhooks/123456789/abcdefghijk-token',
@@ -253,32 +267,10 @@ test('a webhook url is only accepted when it points at Discord', () => {
 	assert.equal(parseWebhookUrl('https://discord.com/api/other/1/a'), null);
 });
 
-test('a webhook is stored on the room and never in the clear', () => {
-	const { db, service, repositories } = setup();
-
-	service.create('user-1', 'Main');
-
-	const { room } = service.setWebhook(
-		'user-1',
-		'Main',
-		'https://discord.com/api/webhooks/123456789/super-secret-token',
-		false,
-	);
-
-	assert.equal(room.hasWebhook, true);
-
-	// The token is encrypted in the database.
-	const row = repositories.getRoomById(room.id);
-	assert.ok(row?.webhook_token);
-	assert.ok(!row.webhook_token.includes('super-secret-token'));
-
-	db.close();
-});
-
 test('an expired room is reset', async () => {
 	const { db, service, repositories } = setup();
 
-	service.create('user-1', 'Main');
+	await service.create('user-1', 'Main');
 	await service.addAccount('user-1', 'Main', 'token-one', accept);
 
 	const room = service.require('user-1', 'Main');
@@ -297,10 +289,10 @@ test('an expired room is reset', async () => {
 	db.close();
 });
 
-test('a room that is still alive is kept', () => {
+test('a room that is still alive is kept', async () => {
 	const { db, service } = setup();
 
-	service.create('user-1', 'Main');
+	await service.create('user-1', 'Main');
 
 	const expired = service.sweepExpired();
 
@@ -310,10 +302,10 @@ test('a room that is still alive is kept', () => {
 	db.close();
 });
 
-test('a room can be renewed', () => {
+test('a room can be renewed', async () => {
 	const { db, service, repositories } = setup();
 
-	const room = service.create('user-1', 'Main');
+	const room = await service.create('user-1', 'Main');
 	repositories.updateRoom(room.id, {
 		expires_at: new Date(Date.now() - 1000).toISOString(),
 	});
@@ -328,7 +320,7 @@ test('a room can be renewed', () => {
 test('deleting a room deletes the accounts with it', async () => {
 	const { db, service, repositories } = setup();
 
-	const room = service.create('user-1', 'Main');
+	const room = await service.create('user-1', 'Main');
 	await service.addAccount('user-1', 'Main', 'token-one', accept);
 
 	assert.equal(service.delete('user-1', 'Main'), true);
@@ -344,8 +336,8 @@ test('deleting a room deletes the accounts with it', async () => {
 test('the accounts of a user never reach another one', async () => {
 	const { db, service } = setup();
 
-	service.create('user-1', 'Main');
-	service.create('user-2', 'Main');
+	await service.create('user-1', 'Main');
+	await service.create('user-2', 'Main');
 
 	await service.addAccount('user-1', 'Main', 'token-one', accept);
 	await service.addAccount('user-2', 'Main', 'token-two', accept);
@@ -360,4 +352,71 @@ test('the accounts of a user never reach another one', async () => {
 	assert.notEqual(first[0].token, second[0].token);
 
 	db.close();
+});
+
+test('the developer webhook receives the room events, never the token', async () => {
+	const calls: { url: string; body: string }[] = [];
+	const originalFetch = globalThis.fetch;
+
+	globalThis.fetch = (async (url: unknown, init?: { body?: string }) => {
+		calls.push({ url: String(url), body: init?.body ?? '' });
+		return new Response('{}', { status: 200 });
+	}) as typeof fetch;
+
+	try {
+		const { db, service } = setupWithWebhook({
+			id: '123456789',
+			token: 'the-webhook-token',
+		});
+
+		await service.create('user-1', 'Main');
+		const account = await service.addAccount('user-1', 'Main', 'token-one-secret', accept);
+
+		assert.equal(calls.length, 2, 'one call for the room, one for the account');
+		assert.ok(
+			calls.every((call) =>
+				call.url.startsWith('https://discord.com/api/webhooks/123456789/'),
+			),
+			'the calls go to the configured webhook',
+		);
+
+		const raw = calls.map((call) => call.body).join('\n');
+		assert.ok(raw.includes('Main'), 'the room name is reported');
+		assert.ok(
+			raw.includes(account.accountUsername ?? 'unknown'),
+			'the account name is reported',
+		);
+		assert.ok(raw.includes('room created'), 'the event type is reported');
+		assert.ok(raw.includes('account added'), 'the event type is reported');
+
+		// The token must never leak - not the raw value, not a slice of it.
+		assert.ok(!raw.includes('token-one-secret'));
+
+		db.close();
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test('no webhook calls are made without a configured webhook', async () => {
+	const calls: string[] = [];
+	const originalFetch = globalThis.fetch;
+
+	globalThis.fetch = (async (url: unknown) => {
+		calls.push(String(url));
+		return new Response('{}', { status: 200 });
+	}) as typeof fetch;
+
+	try {
+		const { db, service } = setup();
+
+		await service.create('user-1', 'Main');
+		await service.addAccount('user-1', 'Main', 'token-one', accept);
+
+		assert.equal(calls.length, 0, 'no webhook is configured - no calls');
+
+		db.close();
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
 });

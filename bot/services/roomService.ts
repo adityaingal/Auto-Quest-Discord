@@ -5,7 +5,7 @@ import {
 	NotFoundError,
 	ValidationError,
 } from '../utils/errors';
-import { DiscordWebhook, parseWebhookUrl, WebhookTarget } from '../integrations/webhook';
+import { DiscordWebhook, WebhookTarget } from '../integrations/webhook';
 import { UserSession } from '../integrations/userSession';
 import { COLORS, EMOJI } from '../ui/theme';
 
@@ -42,7 +42,6 @@ export type Room = {
 	expiresAt: string;
 	/** True when the room is past its 30 day lifetime. */
 	expired: boolean;
-	hasWebhook: boolean;
 	accounts: RoomAccount[];
 };
 
@@ -63,10 +62,12 @@ export type RoomEvent =
  * sequence instead of leaving a hole behind.
  */
 export class RoomService {
+
 	constructor(
 		private readonly repositories: Repositories,
 		private readonly vault: TokenVault,
 		private readonly webhook: DiscordWebhook = new DiscordWebhook(),
+		private readonly target: WebhookTarget | null = null,
 	) {}
 
 	// ------------------------------------------------------------- rooms
@@ -81,11 +82,11 @@ export class RoomService {
 	 * Creates a room for a user. The name is unique per user, so two people
 	 * can use the same name without seeing each other's room.
 	 */
-	create(
+	async create(
 		ownerUserId: string,
 		name: string,
 		description?: string | null,
-	): Room {
+	): Promise<Room> {
 		const cleanName = name.trim();
 
 		if (!ROOM_NAME.test(cleanName)) {
@@ -116,7 +117,10 @@ export class RoomService {
 
 		Logger.info(`Room "${cleanName}" created for ${ownerUserId}`);
 
-		return this.require(ownerUserId, cleanName);
+		const room = this.require(ownerUserId, cleanName);
+		await this.notify(room, 'room_created');
+
+		return room;
 	}
 
 	/** Reads a room. Only the owner gets it. */
@@ -230,7 +234,7 @@ export class RoomService {
 		}
 
 		const record = this.toAccount(account);
-		void this.notify(room, 'account_added', record);
+		await this.notify(room, 'account_added', record);
 
 		return record;
 	}
@@ -269,93 +273,42 @@ export class RoomService {
 		};
 	}
 
-	// ----------------------------------------------------------- webhook
+	// ------------------------------------------------------------ webhook
 
 	/**
-	 * Points a room at a Discord webhook. The webhook can live in another
-	 * server - that is how a room is mirrored somewhere else.
+	 * True when the developer guild webhook is configured. All room events
+	 * are mirrored there.
 	 */
-	setWebhook(
-		ownerUserId: string,
-		roomName: string,
-		url: string,
-		reveal: boolean,
-	): { room: Room; target: WebhookTarget } {
-		const room = this.require(ownerUserId, roomName);
-		const target = parseWebhookUrl(url);
-
-		if (!target) {
-			throw new ValidationError(
-				'That is not a Discord webhook URL. It has to look like https://discord.com/api/webhooks/<id>/<token>.',
-			);
-		}
-
-		this.repositories.updateRoom(room.id, {
-			webhook_id: target.id,
-			webhook_token: this.vault.encrypt(target.token),
-			webhook_reveal: reveal ? 1 : 0,
-		});
-
-		Logger.info(
-			`Webhook set on room "${room.name}" (${target.id})`,
-		);
-
-		return { room: this.require(ownerUserId, room.name), target };
-	}
-
-	clearWebhook(ownerUserId: string, roomName: string): Room {
-		const room = this.require(ownerUserId, roomName);
-
-		this.repositories.updateRoom(room.id, {
-			webhook_id: null,
-			webhook_token: null,
-			webhook_reveal: 0,
-		});
-
-		return this.require(ownerUserId, room.name);
+	get webhookConfigured(): boolean {
+		return this.target !== null;
 	}
 
 	/**
-	 * Posts an event of a room to its webhook. The token is never sent in
-	 * full unless the owner explicitly asked for it - a webhook usually
-	 * points at a channel other people can read.
+	 * Posts an event of a room to the developer guild webhook. The token is
+	 * never sent - only the room name, the account and the event type.
 	 */
 	async notify(
 		room: Room,
 		event: RoomEvent,
 		account?: RoomAccount,
 	): Promise<boolean> {
-		const row = this.repositories.getRoomById(room.id);
+		if (!this.target) return false;
 
-		if (!row?.webhook_id || !row.webhook_token) return false;
-
-		let token: string;
-		try {
-			token = this.vault.decrypt(row.webhook_token);
-		} catch {
-			Logger.warn(
-				`The webhook of room "${row.name}" could not be decrypted`,
-			);
-			return false;
-		}
-
-		const target: WebhookTarget = { id: row.webhook_id, token };
-		const reveal = row.webhook_reveal === 1;
 		const lines: string[] = [];
 
 		if (event === 'room_created') {
-			lines.push(`**Room created:** ${row.name}`);
+			lines.push(`**Room created:** ${room.name}`);
 		}
 
 		if (event === 'account_added' && account) {
 			lines.push(
-				`**Account added:** ${account.accountUsername ?? 'unknown'} in room ${row.name} (slot ${account.slot})`,
+				`**Account added:** ${account.accountUsername ?? 'unknown'} in room ${room.name} (slot ${account.slot})`,
 			);
 		}
 
 		if (event === 'account_removed' && account) {
 			lines.push(
-				`**Account removed:** ${account.accountUsername ?? 'unknown'} from room ${row.name} (slot ${account.slot})`,
+				`**Account removed:** ${account.accountUsername ?? 'unknown'} from room ${room.name} (slot ${account.slot})`,
 			);
 		}
 
@@ -364,7 +317,7 @@ export class RoomService {
 		const fields: { name: string; value: string; inline: boolean }[] = [
 			{
 				name: 'Room',
-				value: row.name,
+				value: room.name,
 				inline: true,
 			},
 			{
@@ -384,7 +337,7 @@ export class RoomService {
 			});
 		}
 
-		return this.webhook.send(target, {
+		return this.webhook.send(this.target, {
 			username: 'Quest Completer',
 			embeds: [
 				{
@@ -559,7 +512,6 @@ export class RoomService {
 			expiresAt: row.expires_at,
 			expired:
 				new Date(row.expires_at).getTime() <= Date.now(),
-			hasWebhook: Boolean(row.webhook_id),
 			accounts: this.repositories
 				.listRoomAccounts(row.id)
 				.map((account) => this.toAccount(account)),

@@ -18,6 +18,8 @@ import { RoomService } from './roomService';
 import { Notifier } from './notifier';
 import { UserSession } from '../integrations/userSession';
 import { AccountScope, scopeKey } from './scope';
+import { parseWebhookUrl } from '../integrations/webhook';
+import { Logger } from '../utils/logger';
 
 /** The configuration key that holds the account the commands work with. */
 export const DEFAULT_ACCOUNT_KEY = 'auto.default_account';
@@ -75,7 +77,22 @@ export function createServices(
 	);
 
 	const tokenService = new TokenService(repositories, vault);
-	const roomService = new RoomService(repositories, vault);
+
+	// The developer guild webhook receives every room event (room created,
+	// account added, account removed). It is configured via WEBHOOK_URL -
+	// and only in the developer guild, not for every user.
+	const devWebhook = config.webhookUrl ? parseWebhookUrl(config.webhookUrl) : null;
+
+	if (config.webhookUrl && !devWebhook) {
+		Logger.warn(
+			'WEBHOOK_URL is set but does not look like a Discord webhook URL - it will not be used. ' +
+				'It has to look like https://discord.com/api/webhooks/<id>/<token>.',
+		);
+	} else if (devWebhook) {
+		Logger.info('Developer guild webhook configured - room events will be mirrored there');
+	}
+
+	const roomService = new RoomService(repositories, vault, undefined, devWebhook);
 
 	const adminService = new AdminService(
 		repositories,

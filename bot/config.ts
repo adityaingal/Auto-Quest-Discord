@@ -21,6 +21,9 @@ export type Config = {
 	notificationIntervalMinutes: number;
 	port: number;
 	commandPrefix: string;
+	/** A Discord webhook URL in the developer guild that receives every room
+	 *  event. Optional - when unset, no webhook posts are sent. */
+	webhookUrl: string | null;
 };
 
 function readDotEnv(
@@ -121,5 +124,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		),
 		port: Number(env.PORT ?? 3000),
 		commandPrefix: env.BOT_PREFIX?.trim() || '/',
+		webhookUrl: env.WEBHOOK_URL?.trim() || null,
 	};
 }

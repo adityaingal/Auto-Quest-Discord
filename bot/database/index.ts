@@ -224,6 +224,15 @@ export const MIGRATIONS: Migration[] = [
 				ON room_accounts (room_id, slot ASC);
 		`,
 	},
+	{
+		version: 7,
+		name: 'drop_per_room_webhooks',
+		sql: `
+			ALTER TABLE rooms DROP COLUMN webhook_id;
+			ALTER TABLE rooms DROP COLUMN webhook_token;
+			ALTER TABLE rooms DROP COLUMN webhook_reveal;
+		`,
+	},
 ];
 
 export class Database {
