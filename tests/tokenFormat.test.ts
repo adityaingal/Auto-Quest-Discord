@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { TokenService } from '../bot/services/tokenService';
 
 test('user tokens are detected and refused', () => {
-	// base64("1543822946328514683") - the legacy user token from the 1.0 selfbot
+	// A synthetic user token: base64("1000000000000000000") + two segments.
 	const userToken =
-		'MTU0MzgyMjk0NjMyODUxNDY4Mw.G4YkLq.-fkewLX6I3ZFvVBTfcSx2fJU70BonshKcXQMO0';
+		'MTAwMDAwMDAwMDAwMDAwMDAw.G4YkLq.-fkewLX6I3ZFvVBTfcSx2fJU70BonshKcXQMO0';
 
 	assert.equal(TokenService.looksLikeUserToken(userToken), true);
 	assert.equal(TokenService.looksLikeUserToken('short'), false);
