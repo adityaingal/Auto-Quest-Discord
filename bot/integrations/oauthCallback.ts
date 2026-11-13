@@ -43,23 +43,39 @@ export async function handleOAuthCallback(
 	const state = url.searchParams.get('state');
 	const error = url.searchParams.get('error');
 
+	const received = [...url.searchParams.keys()].filter(
+		(key) => key !== 'code',
+	);
+	Logger.info(
+		`OAuth callback reached with parameters: ${
+			received.length > 0 ? received.join(', ') : 'none'
+		}${code ? ' (+code)' : ''}`,
+	);
+
 	if (error) {
 		return {
 			status: 400,
 			html: page(
 				'Authorization failed',
-				`Discord reported: ${error}. You can close this window and try again.`,
+				`Discord reported: <code>${error}</code>. You can close this window and try again.`,
 				false,
 			),
 		};
 	}
 
 	if (!code || !state) {
+		// The page was opened directly instead of through the Discord
+		// redirect - show how it is supposed to work.
 		return {
-			status: 400,
+			status: 200,
 			html: page(
-				'Invalid request',
-				'The authorization link was incomplete. Run <code>/account link</code> again.',
+				'Link your account',
+				'This page is the end of the Discord OAuth2 flow - it is not meant to be opened directly.<br><br>' +
+					'<strong>How to link your account:</strong><br>' +
+					'1. Open Discord and run <code>/account link</code><br>' +
+					'2. Click the <strong>Authorise with Discord</strong> button<br>' +
+					'3. Approve the request - Discord sends you back here automatically<br><br>' +
+					'Nothing is stored until that approval happens.',
 				false,
 			),
 		};

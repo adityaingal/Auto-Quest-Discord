@@ -73,19 +73,41 @@ test('unknown paths return a 404', async () => {
 	db.close();
 });
 
-test('the oauth callback rejects an incomplete request', async () => {
+test('the oauth callback explains how to link an account', async () => {
 	const { services, db } = fakeServices();
 	const server = startHttpServer(0, services);
 
-	const port = (server.address() as AddressInfo).port;
-	const response = await fetch(
-		`http://127.0.0.1:${port}/oauth/callback?code=abc`,
-	);
+	try {
+		const port = (server.address() as AddressInfo).port;
+		const response = await fetch(
+			`http://127.0.0.1:${port}/oauth/callback?code=abc`,
+		);
 
-	assert.equal(response.status, 400);
-	const html = await response.text();
-	assert.ok(html.includes('Invalid request'));
+		assert.equal(response.status, 200);
+		const html = await response.text();
+		assert.ok(html.includes('Link your account'));
+		assert.ok(html.includes('/account link'));
+	} finally {
+		server.close();
+		db.close();
+	}
+});
 
-	server.close();
-	db.close();
+test('the oauth callback reports a rejected authorization', async () => {
+	const { services, db } = fakeServices();
+	const server = startHttpServer(0, services);
+
+	try {
+		const port = (server.address() as AddressInfo).port;
+		const response = await fetch(
+			`http://127.0.0.1:${port}/oauth/callback?error=access_denied`,
+		);
+
+		assert.equal(response.status, 400);
+		const html = await response.text();
+		assert.ok(html.includes('access_denied'));
+	} finally {
+		server.close();
+		db.close();
+	}
 });
