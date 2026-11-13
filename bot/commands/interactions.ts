@@ -651,12 +651,8 @@ export class InteractionRouter {
 			return;
 		}
 
-		const filteredPlan = plan.filter((job) =>
-			filterPayloadQuests([job.quest], filter).length > 0,
-		);
-
 		// The live view.
-		const entries: QueueEntry[] = filteredPlan.map((job) => ({
+		const entries: QueueEntry[] = plan.map((job) => ({
 				name: job.quest.config.messages.quest_name,
 				account: job.account,
 				taskType: job.quest.config.task_config_v2?.tasks
@@ -757,7 +753,7 @@ export class InteractionRouter {
 
 					await live(quest, { ...progress, state }, index);
 				},
-				{ account, plan: filteredPlan },
+				{ account, plan },
 			);
 		} catch (error) {
 			Logger.error(
