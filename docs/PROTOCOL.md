@@ -1,5 +1,12 @@
 # Auto Quest Discord — Technical Protocol Spec
 
+> **Note (2.0 rewrite):** this document describes the Discord quest protocol.
+> The bot no longer *acts* as a user - the impersonation, the user-token flow
+> and the captcha automation described in §2, §3.4, §3.5 and §4 are **not
+> implemented any more** (see [`MIGRATION.md`](MIGRATION.md)). The bot only
+> *reads* quest configuration through the catalogue or a linked OAuth2 account
+> and reports what Discord returns.
+
 Complete description of how this program talks to Discord, so another bot (or an
 LLM) can reimplement it. Everything marked **[verified]** was confirmed against the
 live API; everything marked **[docs]** comes from <https://docs.discord.food/resources/quests>.

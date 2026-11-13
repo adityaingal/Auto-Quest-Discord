@@ -1,4 +1,4 @@
-import { REST } from '@discordjs/rest';
+import { REST } from 'discord.js';
 
 const MAX_LENGTH = 1900;
 
@@ -12,10 +12,10 @@ export type NotifierOptions = {
 };
 
 /**
- * Posts status messages to a Discord channel with a separate bot account.
+ * Posts status messages to a Discord channel with the bot account.
  *
- * The bot token is only used for notifications - the quests themselves are
- * always completed with the user token, because quests are a user feature.
+ * The bot token is only used for notifications - the quests are always
+ * completed with the user session, because quests are a user feature.
  */
 export class Notifier {
 	private readonly rest: REST | null = null;
@@ -24,7 +24,9 @@ export class Notifier {
 
 	constructor(options: NotifierOptions = {}) {
 		const token =
-			options.botToken?.trim() ?? process.env.BOT_TOKEN?.trim();
+			options.botToken?.trim() ??
+			process.env.BOT_TOKEN?.trim() ??
+			process.env.DISCORD_BOT_TOKEN?.trim();
 		const channelId =
 			options.channelId?.trim() ?? process.env.NOTIFY_CHANNEL_ID?.trim();
 

@@ -1,0 +1,45 @@
+services:
+  - type: web
+    name: discord-quest-completer
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 24.0.0
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DATABASE_PATH
+        value: /var/data/quest-bot.sqlite
+      - key: QUEST_CATALOG_PATH
+        value: quest.json
+      - key: LOG_LEVEL
+        value: INFO
+      - key: NOTIFICATION_INTERVAL_MINUTES
+        value: 15
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: DISCORD_REDIRECT_URI
+        sync: false
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: OWNER_ID
+        sync: false
+      - key: ADMIN_ROLE_ID
+        sync: false
+      - key: GUILD_ID
+        sync: false
+    disk:
+      name: quest-data
+      mountPath: /var/data
+      sizeGB: 1

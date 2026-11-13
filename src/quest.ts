@@ -85,6 +85,29 @@ export class Quest {
 	}
 
 	/**
+	 * Every task of the quest with its target, merged from task_config and
+	 * task_config_v2.
+	 */
+	get taskList(): { type: string; target: number }[] {
+		const sources = [
+			this.config?.task_config,
+			this.config?.task_config_v2,
+		];
+
+		const tasks = new Map<string, { type: string; target: number }>();
+
+		for (const source of sources) {
+			for (const [type, task] of Object.entries(source?.tasks ?? {})) {
+				if (!tasks.has(type)) {
+					tasks.set(type, { type, target: task?.target ?? 0 });
+				}
+			}
+		}
+
+		return [...tasks.values()];
+	}
+
+	/**
 	 * The first task type this quest can be completed with, if any is supported.
 	 */
 	get taskType(): QuestTaskConfigType | undefined {

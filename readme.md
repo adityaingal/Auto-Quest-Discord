@@ -1,230 +1,261 @@
-# 🤖 Discord Quest Selfbot
+# Discord Quest Completer
 
-> **Disclaimer:** Selfbots are against Discord ToS. Use this at your own risk. I am not responsible for any bans.
+> A Discord bot that shows Discord Quests (the sponsored missions in the Quest
+> Home), their requirements, progress and rewards - driven entirely through
+> slash commands.
+>
+> This is the 2.0 rewrite of the original selfbot. The quest engine and the
+> configuration parser were kept; the user-token automation was replaced by
+> official bot authentication and OAuth2 account linking.
+> See [`docs/MIGRATION.md`](docs/MIGRATION.md) for the full inventory.
 
-Automated bot for completing Discord Missions with a clean CLI interface, live countdown feature, and automatic reward detection.
-## ✨ Features
-> 🖥️ **Tampilan CLI Keren:** Menggunakan tabel rapi dan ASCII art.
-> ⏱️ **Live Countdown:** Menampilkan sisa waktu quest secara real-time.
-> 🎁 **Auto Reward:** Mengklaim hadiah (Orbs/Decoration) secara otomatis setelah quest selesai.
-> ⚡ **Ringan & Cepat:** Dibangun menggunakan TypeScript & Node.js terbaru.
+---
 
-## 📦 Installation & Setup
+## Features
 
-> [!NOTE]
-> **[Node.js](https://nodejs.org/) 24.0.0 or newer is required**
-> **[Git](https://git-scm.com/)**
+| | |
+| --- | --- |
+| 🧩 **Slash commands only** | 26 commands in 5 groups, no prefix commands |
+| 🔎 **Quest intelligence** | task types, requirements, platforms, rewards, eligibility |
+| 🔐 **Official OAuth2 linking** | encrypted token storage, single-use state, revocable |
+| 🗄️ **SQLite persistence** | versioned migrations, progress history, admin audit log |
+| 🔔 **Notifications** | new quests, progress, completion, reward and expiry events |
+| 🎨 **Rich UI** | embeds, progress bars, dropdowns, pagination, confirmation buttons |
+| 🩺 **Health endpoint** | `/health` for hosting platforms, graceful shutdown |
+| 🛡️ **Safe by design** | no selfbot, no user tokens, no captcha automation |
 
-## 🚀 Cara Install & Menjalankan
-Ikuti langkah-langkah berikut di terminal (CMD/PowerShell/Termux):
+---
 
-### 1. Clone Repositori
-```
-git clone https://github.com/lfathh/Auto-Quest-Discord.git
-cd Auto-Quest-Discord
-```
-### 2. Install Modules
-```
+## Requirements
+
+* Node.js **22.5+** (the bot uses the built-in `node:sqlite` module) - Node 24 recommended
+* A Discord application with a bot user
+* Optional: a persistent disk (SQLite) on your hosting platform
+
+---
+
+## Installation
+
+```bash
+git clone <your-repo> discord-quest-completer
+cd discord-quest-completer
 npm install
-```
-### 3. Setup Token
-Buat file baru bernama `.env` di dalam folder bot, lalu isi token Discord kamu:
-```
-TOKEN=TOKEN DISCORD ANDA
-```
-
-### Run Script
-```
+cp .env.example .env      # then fill it in
+npm run build
 npm start
 ```
 
-> [!TIP]
-> `npm run dev` menjalankan bot dengan auto-reload, `npm run typecheck` untuk cek error TypeScript.
-> `npm run check-token` untuk memverifikasi token, `npm run list-quests` untuk melihat status quest.
-> Jika `TOKEN` kosong atau tidak valid, bot akan menampilkan pesan error yang jelas lalu berhenti.
+### 1. Create the Discord application
 
-## 👥 Multi Account
+1. <https://discord.com/developers/applications> -> **New Application**
+2. **Bot** -> **Reset Token** -> copy it into `DISCORD_BOT_TOKEN`
+3. **General Information** -> copy the **Application ID** into `DISCORD_CLIENT_ID`
+4. **OAuth2 -> Redirects** -> add `https://<your-host>/oauth/callback`
+   (local development: `http://localhost:3000/oauth/callback`)
+5. **OAuth2 -> URL Configuration** -> copy the **Client Secret** into
+   `DISCORD_CLIENT_SECRET`
+6. **Bot -> Privileged Gateway Intents** -> enable *Message Content* if you
+   want the bot to read command context in DMs
 
-Satu program bisa menjalankan banyak akun **secara paralel**, masing-masing dengan token user sendiri,
-satu bot notifikasi bisa melaporkan semua akun ke channel yang berbeda.
+### 2. Configure
 
-### Cara 1 — file `accounts.json` (rekomendasi)
+```dotenv
+DISCORD_BOT_TOKEN=your-bot-token
+DISCORD_CLIENT_ID=123456789012345678
+DISCORD_CLIENT_SECRET=your-client-secret
+DISCORD_REDIRECT_URI=http://localhost:3000/oauth/callback
+OWNER_ID=your-discord-user-id
+ENCRYPTION_KEY=some-long-random-string
+```
+
+### 3. Invite the bot
+
+`https://discord.com/api/oauth2/authorize?client_id=<CLIENT_ID>&permissions=274145032832&scope=bot%20applications.commands`
+
+### 4. Register the commands
+
+Slash commands are registered automatically on startup. For instant
+registration in one server, set `GUILD_ID`. Without it the commands are
+registered globally (Discord can take up to an hour to propagate).
+
+`/admin setup` shows the current setup and re-registers the commands.
+
+---
+
+## Command reference
+
+### `/quest`
+
+| Subcommand | Description |
+| --- | --- |
+| `/quest list` | All available quests with id, application and eligibility (dropdown + pagination) |
+| `/quest info` | Full details: task types, requirements, platform, rewards |
+| `/quest start` | Eligibility check and the official enrolment route (confirmation buttons) |
+| `/quest progress` | Recorded progress with progress bars |
+| `/quest status` | Status of one quest for your account |
+| `/quest refresh` | Refresh the quest information and store it |
+| `/quest history` | Your recent quest activity |
+
+### `/account`
+
+| Subcommand | Description |
+| --- | --- |
+| `/account link` | Official OAuth2 authorisation (only the `identify` scope) |
+| `/account status` | Whether an account is linked and still valid |
+| `/account unlink` | Delete the linked account and its credentials |
+| `/account privacy` | What is stored, who can see it, how to remove it |
+
+### `/task`
+
+| Subcommand | Description |
+| --- | --- |
+| `/task list` | Every task type Discord uses |
+| `/task info` | What one task type requires |
+| `/task progress` | Recorded progress grouped by quest |
+| `/task verify` | Verify a value against a live API response (never fabricates one) |
+
+### `/reward`
+
+| Subcommand | Description |
+| --- | --- |
+| `/reward list` | Rewards recorded for your account |
+| `/reward info` | Reward details and the requirements behind them |
+| `/reward status` | Eligibility and claim status |
+| `/reward claim` | Start the official claim flow (human captcha when Discord asks) |
+| `/reward code` | Fetch a claimed reward code through the Discord API |
+
+### `/admin` (owner or admin role)
+
+| Subcommand | Description |
+| --- | --- |
+| `/admin setup` | Setup status and command registration |
+| `/admin stats` | Usage statistics |
+| `/admin users` | Known users |
+| `/admin logs` | Admin audit log |
+| `/admin reload` | Reload the catalogue and the configuration |
+| `/admin backup` | Write a database backup |
+| `/admin restore` | Restore a backup (autocomplete over the backup files) |
+| `/admin maintenance` | Toggle maintenance mode (confirmation button) |
+| `/admin config` | Read and write configuration values |
+
+---
+
+## Architecture
+
+```
+Discord slash command
+        |
+        v
+Command handler  (bot/commands/*)
+        |
+        v
+Quest / Reward / Account / Progress service  (bot/services/*)
+        |
+        v
+Legacy quest engine  (src/quest.ts + src/interface.ts)   <- unchanged parsing
+        |
+        v
+Quest provider  (bot/integrations/*)
+        |
+        v
+SQLite (bot/database/*)
+        |
+        v
+Embed response (bot/ui/*)
+```
+
+| Folder | Content |
+| --- | --- |
+| `bot/commands/` | slash command definitions and the component router |
+| `bot/services/` | quest, account, progress, reward, notification, admin logic |
+| `bot/integrations/` | OAuth2, Discord REST for linked accounts, quest providers |
+| `bot/database/` | connection, migrations, repositories |
+| `bot/ui/` | embeds, components, theme |
+| `bot/utils/` | config, logger, errors, crypto |
+| `src/` | the preserved legacy quest engine (models + parser) |
+
+---
+
+## Environment variables
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `DISCORD_BOT_TOKEN` | yes | - | bot token |
+| `DISCORD_CLIENT_ID` | yes | - | application id |
+| `DISCORD_CLIENT_SECRET` | no | - | needed for `/account link` |
+| `DISCORD_REDIRECT_URI` | no | - | OAuth2 redirect target |
+| `ENCRYPTION_KEY` | no | client secret | key for the token vault |
+| `OWNER_ID` | no | - | full admin access |
+| `ADMIN_ROLE_ID` | no | - | role that may use `/admin` |
+| `GUILD_ID` | no | - | guild scoped command registration |
+| `DATABASE_PATH` | no | `data/quest-bot.sqlite` | SQLite file |
+| `QUEST_CATALOG_PATH` | no | `quest.json` | quest catalogue snapshot |
+| `LOG_LEVEL` | no | `INFO` | `DEBUG`/`INFO`/`WARN`/`ERROR` |
+| `NOTIFICATION_INTERVAL_MINUTES` | no | `15` | notification polling interval |
+| `PORT` | no | `3000` | HTTP port for `/health` and the OAuth2 callback |
+
+---
+
+## Render deployment
+
+`render.yaml` is included - Render picks it up automatically.
+
+1. Push the repository to GitHub and create a **Web Service** from it.
+2. Render uses `render.yaml` (or set it manually):
+   * Build command: `npm ci && npm run build`
+   * Start command: `npm start`
+   * Health check path: `/health`
+3. Add the environment variables (`DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID`,
+   `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`, `OWNER_ID`,
+   `ENCRYPTION_KEY`).
+4. Set `DISCORD_REDIRECT_URI` to `https://<your-service>.onrender.com/oauth/callback`
+   and add the same URL in the Developer Portal.
+5. The blueprint creates a 1 GB disk mounted at `/var/data`; set
+   `DATABASE_PATH=/var/data/quest-bot.sqlite` so the data survives restarts.
+
+Docker works as well:
 
 ```bash
-copy accounts.example.json accounts.json
-notepad accounts.json
-```
-
-```json
-[
-  { "name": "main", "token": "USER_TOKEN_1", "channelId": "CHANNEL_ID_1" },
-  { "name": "alt",  "token": "USER_TOKEN_2", "channelId": "CHANNEL_ID_2" }
-]
-```
-
-- `name` → label di log (`[main]`, `[alt]`) dan di pesan Discord.
-- `token` → token **user** akun tersebut.
-- `channelId` → opsional, channel tujuan notifikasi akun ini (kalau kosong pakai `NOTIFY_CHANNEL_ID`).
-- `botToken` → opsional, bot notifikasi khusus akun ini (kalau kosong pakai `BOT_TOKEN`).
-
-> `accounts.json` sudah masuk `.gitignore` + `.dockerignore`, jadi tidak ikut ter-upload.
-
-### Cara 2 — environment variable
-
-```
-TOKENS=TOKEN_1,TOKEN_2,TOKEN_3
-```
-
-### Perilaku multi akun
-
-| Aspek | Nilai |
-| --- | --- |
-| Jalur akun | Semua akun jalan **paralel**, tiap akun punya gateway sendiri |
-| Output | Otomatis mode **plain log** (ada `[main]`, `[alt]` di depan baris) |
-| Delay connect | `ACCOUNT_STAGGER_SECONDS` (default 8, Discord membatasi rate identify) |
-| Retry connect | 2x percobaan, jeda 10 detik |
-| Akun mati | Akun lain tetap jalan, akun gagal hanya di-log + dinotifikasi |
-| Notifikasi | Prefix nama akun, jadi jelas pesan itu dari akun mana |
-
-Verifikasi semua token sekaligus:
-```
-npm run check-token
-npm run list-quests
+docker build -t quest-completer .
+docker run -d --name quest-completer --restart unless-stopped \
+  -p 3000:3000 \
+  -v quest-data:/app/data \
+  -e DISCORD_BOT_TOKEN=... \
+  -e DISCORD_CLIENT_ID=... \
+  quest-completer
 ```
 
 ---
 
-## ☁️ Hosting (VPS / Railway / Render / Fly.io)
-
-> [!IMPORTANT]
-> Yang dimasukkan ke environment variable hosting adalah **user token** (dari browser), **bukan** bot token.
-> Quest adalah fitur akun user: `/quests/@me` balas `401` untuk bot, dan reward (Orbs) milik akun user.
-
-### Cara cepat dengan Docker
+## Development
 
 ```bash
-docker build -t auto-quest .
-docker run -d --name auto-quest --restart unless-stopped \
-  -e TOKEN="USER_TOKEN_ANDA" \
-  -e LOOP_MINUTES=30 \
-  auto-quest
+npm run dev        # watch mode
+npm run typecheck  # tsc --noEmit
+npm test           # node:test suite
+npm run build      # compile to dist/
 ```
 
-Dengan notifikasi bot:
-```bash
-docker run -d --name auto-quest --restart unless-stopped \
-  -e TOKEN="USER_TOKEN_ANDA" \
-  -e LOOP_MINUTES=30 \
-  -e BOT_TOKEN="BOT_TOKEN_ANDA" \
-  -e NOTIFY_CHANNEL_ID="CHANNEL_ID" \
-  auto-quest
-```
+The test suite covers the legacy parser (both `task_config` formats), the
+database migrations, the repositories, the command definitions, the services,
+the token vault and the UI helpers.
 
-### Environment variables
+---
 
-| Variable | Wajib | Default | Keterangan |
-| --- | --- | --- | --- |
-| `TOKEN` | ya | - | Discord **user** token |
-| `LOOP_MINUTES` | tidak | `0` | Menit antar run. `0` = sekali lalu exit, `30` = loop |
-| `PLAIN_OUTPUT` | tidak | auto | `1` = log tanpa tabel (otomatis jika tanpa TTY) |
-| `CAPTCHA_SERVICE` | tidak | - | `2captcha` atau `anti-captcha` |
-| `CAPTCHA_API_KEY` | tidak | - | API key untuk solving captcha claim |
-| `BOT_TOKEN` | tidak | - | Token bot Discord **hanya untuk notifikasi** |
-| `NOTIFY_CHANNEL_ID` | tidak | - | Channel id tujuan notifikasi |
-| `BOT_COMMAND_CHANNEL_ID` | tidak | - | Channel tempat bot menerima perintah |
-| `BOT_ADMIN_USER_IDS` | tidak | - | User id yang boleh memakai `!run` / `!stop` |
-| `ACCOUNT_STAGGER_SECONDS` | tidak | `8` | Jeda antar akun saat connect |
+## Limits (and why)
 
-### 🎮 Bot sebagai control panel
+* Discord's quest endpoints are **user session** endpoints. A bot account gets
+  `401`, so the bot cannot enrol quests, forge progress or claim rewards by
+  itself. It reports what the official API returns and routes the action to the
+  Discord client.
+* Captcha verifications are always solved by a human - the bot never bypasses
+  them.
+* The bundled `quest.json` is a snapshot of the quest configurations; use
+  `/quest refresh` to update the stored copy.
 
-> [!IMPORTANT]
-> **Bot Discord tidak bisa menyelesaikan quest sendiri.** Quest adalah fitur akun
-> *user*: `/quests/@me` balas `401` untuk bot, dan reward (Orbs) milik akun user.
-> Yang dilakukan bot adalah **mengendalikan worker** yang memakai user token.
+---
 
-Kalau `BOT_TOKEN` + `BOT_COMMAND_CHANNEL_ID` di-set, bot akan connect ke gateway dan
-mendengarkan perintah di channel tersebut:
+## Credits
 
-| Perintah | Fungsi | Syarat |
-| --- | --- | --- |
-| `!help` | daftar perintah | - |
-| `!status` | status tiap akun (idle / running / offline, hasil run terakhir) | - |
-| `!quests` | quest yang sedang jalan + sisa waktu + reward | - |
-| `!run` | jalankan quest sekarang untuk semua akun | admin |
-| `!run <nama>` | jalankan hanya untuk satu akun | admin |
-| `!stop` | matikan program | admin |
-
-Contoh:
-```
-> !status
-**main** (Br0ken) - 🟢 idle | last run 2/3
-**alt** (Br0ken) - 🟡 running
-
-> !quests
-**main**
-`Godzilla Minus Zero` - 700 Orbs - Running (2m 5s left)
-```
-
-Pengaturan yang diperlukan:
-```
-BOT_TOKEN=MTI...bot.token
-BOT_COMMAND_CHANNEL_ID=123456789012345678
-BOT_ADMIN_USER_IDS=1543822946328514683
-```
-
-Bot butuh izin **View Channel** + **Send Messages** + **Read Message History** di channel tersebut.
-Prefix perintah bisa diubah lewat `BOT_PREFIX` (default `!`).
-
-### 🤖 Notifikasi lewat Discord bot (opsional)
-
-Kalau mau status dikirim ke channel Discord, buat bot di
-[Developer Portal](https://discord.com/developers/applications) → **Bot** → **Reset Token**,
-lalu invite ke server dengan izin **Send Messages** dan **View Channel**.
-
-```
-BOT_TOKEN=MTI...bot.token
-NOTIFY_CHANNEL_ID=123456789012345678
-```
-
-Bot hanya **melapor** apa yang terjadi, quest tetap diselesaikan dengan user token:
-
-| Pesan | Kapan |
-| --- | --- |
-| `🟢 Auto Quest online` | bot connect ke gateway |
-| `✅ Quest completed` | quest selesai, tampilkan reward + status claim |
-| `🎁 Reward claimed` | hadiah berhasil di-claim |
-| `⚠️ Reward not claimed` | butuh captcha / gagal claim |
-| `❌ Quest failed` | quest gagal (mis. task type tidak didukung) |
-| `🏁 Cycle finished` | rekap jumlah quest selesai per siklus |
-
-### Railway / Render / Fly.io
-
-1. Upload repo (atau `railway init` / render dari GitHub).
-2. Build command: `npm ci && npm run build`
-3. Start command: `npm run start:prod`
-4. Variables: `TOKEN` + `LOOP_MINUTES=30`
-5. Railway/Render tanpa support Docker akan otomatis memakai `package.json` scripts.
-
-### Catatan penting
-
-- **Reward claim butuh captcha.** Discord memproteksi `POST /quests/{id}/claim-reward` dengan hCaptcha.
-  - Tanpa `CAPTCHA_API_KEY`: quest tetap selesai, tapi reward harus diklaim manual (klik "Claim" di Discord, 1 klik).
-  - Dengan `CAPTCHA_API_KEY`: bot solving captcha otomatis lalu纲要 reward.
-- **Jangan jalanin 2 instance bersamaan** (mis. lokal + hosting) pada token yang sama.
-- Quest `WATCH_VIDEO` mengikuti aturan waktu server, jadi butuh ~15 menit per quest video.
-- Quest `PLAY_ON_XBOX` / `PLAY_ON_PLAYSTATION` hanya bisa diselesaikan di console.
-
-## 📤 Example Output
-
-After completion, your output may look like this:
-
-![Imgur](https://i.imgur.com/UHDsY6g.png)
-
-## 📘 Dokumentasi
-
-Specifikasi protocol lengkap (endpoint, header, payload, timing rule, captcha, error code)
-ada di [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — bisa dipakai untuk menulis bot lain
-dengan fitur yang sama.
-
-## 🙏 Credits
-> [discord.js](https://github.com/discordjs/discord.js)
+* [discord.js](https://github.com/discordjs/discord.js)
+* [discord.food quest docs](https://docs.discord.food/resources/quests)

@@ -32,11 +32,23 @@ export interface Quest {
 	 * The content areas where the quest can be shown
 	 * @deprecated
 	 */
-	targeted_content: number;
+	targeted_content: number | number[];
 	/**
 	 * Whether the quest is unreleased and in preview for Discord employees
 	 */
 	preview: boolean;
+	/**
+	 * The share policy for the quest
+	 */
+	share_policy?: string;
+	/**
+	 * The call-to-action configuration
+	 */
+	cta_config?: {
+		link?: string;
+		button_label?: string;
+		subtitle?: string;
+	};
 }
 
 /**
@@ -87,6 +99,18 @@ export interface QuestConfig {
 	 * The task configuration for the quest (newer quests only expose this one)
 	 */
 	task_config_v2?: QuestTaskConfig;
+	/**
+	 * The share policy for the quest
+	 */
+	share_policy?: string;
+	/**
+	 * The call-to-action configuration
+	 */
+	cta_config?: {
+		link?: string;
+		button_label?: string;
+		subtitle?: string;
+	};
 	/**
 	 * Specifies rewards for the quest (e.g. collectibles)
 	 */
@@ -344,7 +368,7 @@ export interface QuestRewardsConfig {
 	/**
 	 * The platforms the rewards can be redeemed on
 	 */
-	platforms: number;
+	platforms: number[];
 }
 
 export interface QuestReward {
@@ -410,7 +434,7 @@ export interface QuestRewardMessages {
 	/**
 	 * The instrutions on redeeming the reward per-platform
 	 */
-	reward_redemption_instructions_by_platform?: Record<number, string>;
+	redemption_instructions_by_platform?: Record<number, string>;
 }
 
 export interface QuestVideoMetadata {

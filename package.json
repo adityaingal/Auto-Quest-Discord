@@ -1,38 +1,38 @@
 {
-  "name": "discord-quest-selfbot",
-  "version": "1.0.0",
-  "description": "Quest Bot Auto Claim",
-  "main": "bot.ts",
+  "name": "discord-quest-completer-bot",
+  "version": "2.0.0",
+  "description": "Discord Quest Completer - professional slash command bot",
+  "main": "dist/bot/index.js",
   "scripts": {
-    "start": "tsx --env-file-if-exists=.env bot.ts",
-    "dev": "tsx --env-file-if-exists=.env --watch bot.ts",
-    "build": "tsc",
-    "start:prod": "node --env-file-if-exists=.env dist/bot.js",
-    "check-token": "tsx --env-file-if-exists=.env scripts/check-token.ts",
-    "list-quests": "tsx --env-file-if-exists=.env scripts/list-quests.ts",
-    "typecheck": "tsc --noEmit"
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/bot/index.js",
+    "dev": "tsx watch bot/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "check-env": "tsx scripts/check-env.ts",
+    "migrate": "tsx bot/cli/migrate.ts"
   },
-  "keywords": [],
+  "keywords": [
+    "discord",
+    "quests",
+    "bot"
+  ],
   "author": "User",
   "license": "ISC",
   "type": "commonjs",
   "engines": {
-    "node": ">=20.12"
+    "node": ">=22.5.0"
   },
   "devDependencies": {
     "@types/figlet": "^1.5.8",
-    "@types/node": "^20.10.0",
+    "@types/node": "^24.0.0",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   },
   "dependencies": {
-    "@discordjs/core": "^1.1.1",
-    "@discordjs/rest": "^2.2.0",
-    "@discordjs/ws": "^1.0.2",
-    "discord-api-types": "^0.37.61",
-    "undici": "^6.0.0",
     "chalk": "^4.1.2",
-    "figlet": "^1.7.0",
-    "cli-table3": "^0.6.3"
+    "cli-table3": "^0.6.3",
+    "discord.js": "^14.28.1",
+    "figlet": "^1.7.0"
   }
 }
