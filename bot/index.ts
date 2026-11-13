@@ -200,6 +200,19 @@ async function main(): Promise<void> {
 
 	Logger.info(`OAuth2 client id: ${config.clientId}`);
 
+	// The user sessions that can read quests and run the automation.
+	const sessionLabels = services.autoService.accounts;
+	if (sessionLabels.length > 0) {
+		Logger.info(
+			`User sessions available: ${sessionLabels.join(', ')}`,
+		);
+	} else {
+		Logger.warn(
+			'No user session configured - /quest auto and /quest all stay disabled. ' +
+				'Add one with "/token add <label> <token> user" or set USER_TOKEN in the environment.',
+		);
+	}
+
 	await client.login(config.botToken);
 
 	// Additional bot tokens that were registered with /token add.

@@ -170,6 +170,55 @@ export const tokenCommand = group(
 			},
 		},
 		{
+			name: 'import',
+			description:
+				'Register the USER_TOKEN environment variable as an account.',
+			build: (sub) => {
+				sub.addStringOption((option) =>
+					option
+						.setName('label')
+						.setDescription('A name for this account')
+						.setRequired(false),
+				);
+			},
+			run: async (context: CommandContext) => {
+				assertAdmin(context);
+
+				const fromEnv = process.env.USER_TOKEN?.trim();
+				if (!fromEnv) {
+					await context.interaction.reply({
+						content:
+							'The USER_TOKEN environment variable is not set. Add it to the environment (and to the .env file locally) and restart the bot.',
+						flags: MessageFlags.Ephemeral,
+					});
+					return;
+				}
+
+				const label =
+					context.interaction.options.getString('label')?.trim() ||
+					'USER_TOKEN';
+
+				const record = await context.services.tokenService.add(
+					label,
+					fromEnv,
+					'user',
+				);
+
+				await context.interaction.reply({
+					embeds: [
+						successEmbed(
+							`Imported the USER_TOKEN as **${record.label}** (${
+								record.accountUsername ?? 'unknown account'
+							}).\n` +
+								`Stored encrypted as \`${record.masked}\` (fingerprint \`${record.fingerprint}\`).\n` +
+								'The account is usable immediately - no restart needed.',
+						),
+					],
+					flags: MessageFlags.Ephemeral,
+				});
+			},
+		},
+		{
 			name: 'check',
 			description: 'Validate a registered bot token against Discord.',
 			build: (sub) => {

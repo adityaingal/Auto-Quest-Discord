@@ -103,7 +103,7 @@ test('every command group exposes the documented subcommands', () => {
 			'maintenance',
 			'config',
 		],
-		token: ['list', 'add', 'remove', 'check'],
+		token: ['list', 'add', 'import', 'remove', 'check'],
 	};
 
 	for (const command of commands) {

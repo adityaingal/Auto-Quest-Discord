@@ -108,6 +108,12 @@ export const adminCommand: CommandDefinition = group(
 									name: 'Notification channel',
 									value: channelId ?? 'not set',
 								},
+								{
+									name: 'User sessions',
+									value:
+										services.autoService.accounts.join(', ') ||
+										'none - /quest auto stays disabled',
+								},
 							],
 						),
 					],
