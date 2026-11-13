@@ -25,7 +25,7 @@
 | 🔗 **Developer webhook** | all room events are mirrored to one webhook (configured with `WEBHOOK_URL`) |
 | 🗄️ **SQLite persistence** | versioned migrations, progress history, admin audit log |
 | 🔔 **Notifications** | new quests, progress, completion, reward and expiry events |
-| 🎨 **Rich UI** | embeds, progress bars, dropdowns, pagination, confirmation buttons |
+| 🎨 **Questor style UI** | banner images from the CDN, progress bars, dropdowns with every quest, interactive buttons, pagination |
 | 🩺 **Health endpoint** | `/health` for hosting platforms, graceful shutdown |
 | 🛡️ **Safe by design** | encrypted token vault, per user scoping, no selfbot |
 
@@ -92,12 +92,41 @@ registered globally (Discord can take up to an hour to propagate).
 
 ---
 
+## The quest interface
+
+Run `/quest panel` (or `/quest access` first to link your account):
+
+1. The embed shows the banner image, the reward, the requirement, the quest
+   name, the enrollment status and the progress bar.
+2. Below the embed is the **Quest Selection** dropdown - every quest the bot
+   knows about (from the catalogue, from the account you control or a staged
+   batch) is listed there. Pick one to switch the banner, reward, tasks,
+   progress and enrollment date.
+3. Below the dropdown are the action buttons:
+   - **View Quest** - opens the official game URL from the quest catalogue.
+   - **Details** - full task requirements and reward details.
+   - **Progress** - your own reward state and recorded progress.
+   - **Refresh** - re-fetches the quest data.
+   - **Help** - explains why a quest may be unavailable.
+4. Same flow via `/quest select <quest>` or `/quest search <name>`.
+
+> `View Quest` only appears when the quest publishes a game URL.
+> Enrolling in a quest happens in the Discord client - the bot routes you to
+> it, it does not enrol you automatically.
+
+---
+
 ## Command reference
 
 ### `/quest`
 
 | Subcommand | Description |
 | --- | --- |
+| `/quest panel [account]` | **Open the main interface** - quest banner image, reward, progress bar, the Quest dropdown with every quest and the action buttons (Refresh, Details, Progress, View Quest, Help) |
+| `/quest access` | Link or manage your own account through the official OAuth2 flow |
+| `/quest select <quest>` | Open the main interface for a specific quest |
+| `/quest search <name>` | Search the available quests by name |
+| `/quest categories` | Show the available quests grouped by platform |
 | `/quest list [account]` | All available quests with id, application and eligibility (dropdown + pagination) |
 | `/quest info <quest> [account]` | Full details: task types, requirements, platform, rewards |
 | `/quest start` | Eligibility check and the official enrolment route (confirmation buttons) |

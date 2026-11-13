@@ -12,8 +12,9 @@ import { AccountScope } from '../services/scope';
 import { Logger } from '../utils/logger';
 import { toUserMessage } from '../utils/errors';
 import { buildQuestPages, buildQuestSelect, buildPagingRow } from '../ui/components';
-import { errorEmbed, questDetailEmbed, questListEmbed } from '../ui/embeds';
+import { errorEmbed, infoEmbed, questDetailEmbed, questListEmbed, progressEmbed } from '../ui/embeds';
 import { isAdmin } from './admin';
+import { renderQuestPanel, decodeSegment } from '../ui/panel';
 
 type Handler = (
 	interaction: Interaction,
@@ -35,6 +36,14 @@ export class InteractionRouter {
 		this.register('quest:requirements', this.handleQuestRequirements);
 		this.register('quest:start_confirm', this.handleStartConfirm);
 		this.register('quest:start_cancel', this.handleStartCancel);
+		this.register('quest:panel_select', this.handlePanelSelect);
+		this.register('quest:panel_prev', this.handlePanelNav);
+		this.register('quest:panel_next', this.handlePanelNav);
+		this.register('quest:panel_refresh', this.handlePanelRefresh);
+		this.register('quest:panel_details', this.handlePanelDetails);
+		this.register('quest:panel_progress', this.handlePanelProgress);
+		this.register('quest:panel_help', this.handlePanelHelp);
+		this.register('quest:access', this.handleQuestAccess);
 		this.register('admin:maintenance_confirm', this.handleMaintenance);
 		this.register('admin:maintenance_cancel', this.handleMaintenanceCancel);
 	}
@@ -312,6 +321,244 @@ export class InteractionRouter {
 		interaction: Interaction,
 	): Promise<void> {
 		if (!interaction.isMessageComponent()) return;
+
+		await interaction.update({
+			content: 'Nothing was changed.',
+			components: [],
+		});
+	}
+
+	private async handlePanelSelect(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		const scope = services.scopeFor(interaction.user.id);
+		const account = decodeSegment(interaction.customId.split(':')[3]);
+		const questId = interaction.isStringSelectMenu()
+			? interaction.values[0]
+			: undefined;
+
+		if (!questId) return;
+
+		const page = Number(interaction.customId.split(':')[2] ?? 0);
+		const payload = await renderQuestPanel(
+			services,
+			scope,
+			questId,
+			account,
+			page,
+		);
+
+		await interaction.update({ ...payload });
+	}
+
+	private async handlePanelNav(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		const scope = services.scopeFor(interaction.user.id);
+		const parts = interaction.customId.split(':');
+		const page = Number(parts[2] ?? 0);
+		const account = decodeSegment(parts[3]);
+		const questId = parts[4] ?? null;
+
+		const target =
+			interaction.customId.startsWith('quest:panel_next:')
+				? page + 1
+				: Math.max(0, page - 1);
+
+		const payload = await renderQuestPanel(
+			services,
+			scope,
+			questId,
+			account,
+			target,
+		);
+
+		await interaction.update({ ...payload });
+	}
+
+	private async handlePanelRefresh(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		const parts = interaction.customId.split(':');
+		const questId = parts[2];
+		const account = decodeSegment(parts[3]);
+
+		const scope = services.scopeFor(interaction.user.id);
+		const payload = await renderQuestPanel(
+			services,
+			scope,
+			questId,
+			account,
+			0,
+		);
+
+		await interaction.update({ ...payload });
+	}
+
+	private async handlePanelDetails(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		const parts = interaction.customId.split(':');
+		const questId = parts[2];
+		const account = decodeSegment(parts[3]);
+
+		const scope = services.scopeFor(interaction.user.id);
+		const quest = await services.questService.get(
+			questId,
+			scope,
+			account,
+		);
+
+		await interaction.reply({
+			embeds: [questDetailEmbed(quest)],
+			flags: MessageFlags.Ephemeral,
+		});
+	}
+
+	private async handlePanelProgress(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		const parts = interaction.customId.split(':');
+		const questId = parts[2];
+		const account = decodeSegment(parts[3]);
+
+		const scope = services.scopeFor(interaction.user.id);
+		const quest = await services.questService.status(
+			questId,
+			scope,
+			account,
+		);
+
+		const percent = quest.progress?.percent ?? 0;
+		const lines = [
+			`**${quest.name}**`,
+			'',
+			`Progress: ${quest.progress ? `${percent}% (${quest.progress.value}s / ${quest.progress.target}s)` : 'not enrolled'}`,
+			`Enrolled at: ${quest.progress?.enrolledAt ?? 'not enrolled'}`,
+			`Completed at: ${quest.progress?.completedAt ?? 'not completed'}`,
+		].join('\n');
+
+		await interaction.reply({
+			embeds: [
+				progressEmbed(
+					[
+						{
+							questId: quest.id,
+							questName: quest.name,
+							status: quest.eligibility,
+							value: quest.progress?.value ?? 0,
+							target: quest.progress?.target ?? 0,
+							percent,
+							updatedAt: quest.expiresAt ?? new Date().toISOString(),
+						},
+					],
+				),
+			],
+			flags: MessageFlags.Ephemeral,
+		});
+	}
+
+	private async handlePanelHelp(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		const parts = interaction.customId.split(':');
+		const account = decodeSegment(parts[3]);
+		const scope = services.scopeFor(interaction.user.id);
+
+		const status = services.accountService.status(scope.userId);
+
+		const embed = infoEmbed('QUEST HELP', 'Why a quest may be unavailable.', [
+			{
+				name: 'How a quest works',
+				value:
+					'Quests are sponsored missions. Complete the required task in the Discord client and the reward is granted to the linked account.',
+			},
+			{
+				name: 'Common reasons a quest is unavailable',
+				value: [
+					'- The quest expired',
+					'- The quest is only offered on a platform you do not have',
+					'- The quest is only for certain regions',
+					'- You already completed it',
+				].join('\n'),
+			},
+			{
+				name: 'Account access',
+				value: status.linked
+					? `Linked as ${status.discordUsername ?? 'unknown'} - quest access is available.`
+					: 'No account is linked. Run `/quest access` to link one with the official OAuth2 flow.',
+			},
+			{
+				name: 'Enrollment',
+				value:
+					'Enrolling happens in the Discord client: open Quest Home, pick the quest and press Start.',
+			},
+		]);
+
+		await interaction.reply({
+			embeds: [embed],
+			flags: MessageFlags.Ephemeral,
+		});
+	}
+
+	private async handleQuestAccess(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		if (interaction.customId === 'quest:access:disconnect') {
+			await interaction.update({
+				content:
+					'Disconnect your account? This deletes the linked account and its stored credentials.',
+				components: [
+					new ActionRowBuilder<ButtonBuilder>().addComponents(
+						new ButtonBuilder()
+							.setCustomId('quest:access:confirm')
+							.setLabel('Delete the link')
+							.setStyle(ButtonStyle.Danger),
+						new ButtonBuilder()
+							.setCustomId('quest:access:cancel')
+							.setLabel('Keep it')
+							.setStyle(ButtonStyle.Secondary),
+					),
+				],
+			});
+			return;
+		}
+
+		if (interaction.customId === 'quest:access:confirm') {
+			const removed = services.accountService.unlink(
+				interaction.user.id,
+			);
+
+			await interaction.update({
+				content:
+					removed > 0
+						? 'The linked account and its stored credentials were deleted.'
+						: 'There was no linked account - nothing to remove.',
+				components: [],
+			});
+			return;
+		}
 
 		await interaction.update({
 			content: 'Nothing was changed.',

@@ -179,6 +179,83 @@ export function questDetailEmbed(quest: QuestDetail): EmbedBuilder {
 	return embed;
 }
 
+/**
+ * The Questor style panel embed. It is the main view of a quest: the banner,
+ * the reward, the requirements, the progress and the account status.
+ */
+export function questPanelEmbed(
+	quest: QuestView,
+	accountLabel?: string | null,
+): EmbedBuilder {
+	const reward = quest.rewards[0] ?? null;
+	const rewardText = reward
+		? `${reward.name}${
+				reward.orbQuantity ? ` - ${reward.orbQuantity} Orbs` : ''
+			}`
+		: 'none';
+
+	const progress = quest.progress;
+	const percent = progress?.percent ?? 0;
+	const progressValue = progress
+		? `${renderProgressBar(percent)}\n${progress.value}s / ${progress.target}s (${percent}%)`
+		: QuestEligibility.COMPLETED === quest.eligibility
+			? 'Complete'
+			: 'Not started - enroll in the Discord client';
+
+	const tasks = quest.tasks.length
+		? quest.tasks
+				.map(
+					(task) =>
+						`\`${task.type}\` - ${formatDuration(task.target)}`,
+				)
+				.join('\n')
+		: 'unknown';
+
+	const embed = new EmbedBuilder()
+		.setColor(STATUS_COLOR[quest.eligibility])
+		.setTitle('QUEST COMPLETER')
+		.setDescription(
+			[
+				`**${quest.name}**`,
+				`${quest.gameTitle ?? quest.applicationName ?? 'Unknown game'}${
+					quest.publisher ? ` - ${quest.publisher}` : ''
+				}`,
+				'',
+				eligibilityLabel(quest),
+			].join('\n'),
+		)
+		.addFields(
+			{ name: 'Rewards', value: rewardText, inline: true },
+			{
+				name: 'Task types',
+				value: quest.taskTypes.length
+					? quest.taskTypes.map((type) => `\`${type}\``).join(', ')
+					: 'none',
+				inline: true,
+			},
+			{
+				name: 'Account',
+				value: accountLabel
+					? `\`${accountLabel}\``
+					: 'No account linked - /quest access',
+				inline: true,
+			},
+			{ name: 'Requirement', value: tasks, inline: false },
+			{ name: 'Progress', value: progressValue, inline: false },
+		)
+		.setFooter({
+			text: `Quest ID ${quest.id} - ${quest.source}${
+				quest.live ? ' (live)' : ''
+			}`,
+		})
+		.setTimestamp();
+
+	if (quest.imageUrl) {
+		embed.setImage(quest.imageUrl);
+	}
+
+	return embed;
+}
 export function progressEmbed(
 	entries: {
 		questId: string;

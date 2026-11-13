@@ -16,6 +16,23 @@ import { QuestEligibility } from '../models/enums';
  * the Discord UI.
  */
 
+/**
+ * The CDN banner of a quest. Discord publishes the quest assets as relative
+ * paths on its own CDN, so the URL is derived from those - it is never
+ * guessed from memory.
+ */
+const CDN_BASE = 'https://cdn.discordapp.com/';
+
+function buildImageUrl(quest: Quest): string | null {
+	const assets = quest.config?.assets;
+	const hero = assets?.hero ?? assets?.quest_bar_hero;
+
+	if (!hero) return null;
+	if (hero.startsWith('http')) return hero;
+
+	return `${CDN_BASE}${hero.replace(/^\/+/, '')}`;
+}
+
 function buildRewards(quest: Quest): QuestRewardView[] {
 	const rewards = quest.config?.rewards_config?.rewards ?? [];
 
@@ -87,6 +104,7 @@ export function toQuestView(
 		startsAt: quest.config?.starts_at ?? null,
 		source,
 		live,
+		imageUrl: buildImageUrl(quest),
 	};
 }
 

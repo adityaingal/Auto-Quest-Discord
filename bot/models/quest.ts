@@ -41,6 +41,8 @@ export type QuestView = {
 	source: string;
 	/** True when the data comes from a live Discord response. */
 	live: boolean;
+	/** The CDN banner of the quest, when Discord published one. */
+	imageUrl: string | null;
 };
 
 export type QuestDetail = QuestView & {

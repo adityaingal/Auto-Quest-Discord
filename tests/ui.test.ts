@@ -49,9 +49,10 @@ function questStub() {
 			},
 		],
 		expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-		startsAt: new Date().toISOString(),
+		startsAt: new Date(Date.now() - 3600_000).toISOString(),
 		source: 'catalogue',
 		live: false,
+		imageUrl: null,
 	};
 }
 
