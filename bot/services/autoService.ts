@@ -217,7 +217,8 @@ export class AutoService {
 
 	/**
 	 * The account a command should work with: the named one, otherwise the
-	 * default account, otherwise null (every account).
+	 * default account, otherwise null (every account). "all" is accepted and
+	 * means every configured account.
 	 */
 	resolveAccount(
 		scope: AccountScope,
@@ -225,6 +226,8 @@ export class AutoService {
 	): string | null {
 		const wanted = explicit?.trim();
 		if (!wanted) return this.defaultAccount(scope);
+
+		if (wanted.toLowerCase() === 'all') return null;
 
 		if (!this.accounts(scope).includes(wanted)) {
 			throw new ValidationError(
