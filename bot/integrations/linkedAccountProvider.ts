@@ -4,6 +4,7 @@ import { QuestDetail, QuestView } from '../models/quest';
 import { toQuestDetail, toQuestView } from '../services/questAdapter';
 import { QuestProvider } from './questProvider';
 import { DiscordUserApi } from './discordUserApi';
+import { Logger } from '../utils/logger';
 import {
 	AuthorizationError,
 	IntegrationUnavailableError,
@@ -56,6 +57,13 @@ export class LinkedAccountProvider implements QuestProvider {
 		const response = await api.get<AllQuestsResponse>('/quests/@me');
 
 		if (!response.ok) {
+			// The status is a strong signal: 401/403 for unofficial endpoints,
+			// 429 for rate limits. It is logged (never the token) to make the
+			// live quest integration debuggable.
+			Logger.warn(
+				`Linked account quest API answered HTTP ${response.status} for user ${discordUserId}`,
+			);
+
 			if (response.status === 401 || response.status === 403) {
 				throw new IntegrationUnavailableError(
 					'Live quest data',
