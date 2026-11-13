@@ -32,6 +32,7 @@
   "dependencies": {
     "chalk": "^4.1.2",
     "cli-table3": "^0.6.3",
+    "discord-api-types": "^0.37.120",
     "discord.js": "^14.28.1",
     "figlet": "^1.7.0"
   }

@@ -3,16 +3,17 @@ services:
     name: discord-quest-completer
     runtime: node
     plan: starter
-    region: oregon
-    buildCommand: npm ci && npm run build
+    region: singapore
+    # --include=dev: the TypeScript compiler is a dev dependency and has to be
+    # present during the build. NODE_ENV must NOT be set here, otherwise npm
+    # skips the dev dependencies and the build fails.
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /health
     autoDeploy: true
     envVars:
       - key: NODE_VERSION
         value: 24.0.0
-      - key: NODE_ENV
-        value: production
       - key: PORT
         value: 3000
       - key: DATABASE_PATH
