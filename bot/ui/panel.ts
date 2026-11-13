@@ -23,6 +23,7 @@ export const PANEL_IDS = {
 	details: 'quest:panel_details',
 	progress: 'quest:panel_progress',
 	help: 'quest:panel_help',
+	completeAll: 'quest:panel_complete_all',
 } as const;
 
 export type PanelPayload = {
@@ -170,6 +171,23 @@ export function actionButtons(
 }
 
 /**
+ * The button that runs every quest the account of the user offers. Only the
+ * owner can operate the automation, and it is only available when the user
+ * has an account configured.
+ */
+export function completeAllButton(
+	account = '-',
+): ActionRowBuilder<ButtonBuilder> {
+	return new ActionRowBuilder<ButtonBuilder>().addComponents(
+		new ButtonBuilder()
+			.setCustomId(`${PANEL_IDS.completeAll}:${account}`)
+			.setLabel('Complete All Quests')
+			.setStyle(ButtonStyle.Success)
+			.setEmoji('⚡'),
+	);
+}
+
+/**
  * Assembles the complete panel: the embed, the select menu and the buttons.
  */
 export function buildQuestPanel(
@@ -186,6 +204,7 @@ export function buildQuestPanel(
 		embeds: [questPanelEmbed(quest, accountLabel)],
 		components: [
 			actionButtons(quest, account),
+			completeAllButton(account),
 			questSelectMenu(quests, quest.id, safePage, account),
 			...(totalPages > 1
 				? [navButtons(safePage, totalPages, quest.id, account)]

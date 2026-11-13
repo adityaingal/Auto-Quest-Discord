@@ -44,6 +44,7 @@ export class InteractionRouter {
 		this.register('quest:panel_progress', this.handlePanelProgress);
 		this.register('quest:panel_help', this.handlePanelHelp);
 		this.register('quest:access', this.handleQuestAccess);
+		this.register('quest:panel_complete_all', this.handleCompleteAll);
 		this.register('admin:maintenance_confirm', this.handleMaintenance);
 		this.register('admin:maintenance_cancel', this.handleMaintenanceCancel);
 	}
@@ -563,6 +564,73 @@ export class InteractionRouter {
 		await interaction.update({
 			content: 'Nothing was changed.',
 			components: [],
+		});
+	}
+
+	/**
+	 * The Complete All button. It runs the automation for every account of
+	 * the scope, one after another, until the queue is empty or the user
+	 * stops it. The reply is ephemeral - nobody else sees the progress.
+	 */
+	private async handleCompleteAll(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		const accountSegment = interaction.customId.split(':')[2];
+		const account = decodeSegment(accountSegment);
+		const scope = services.scopeFor(interaction.user.id);
+
+		if (!services.autoService.enabled(scope)) {
+			await interaction.reply({
+				content:
+					'You have no account yet. Add one with `!token add <label> <token> user` (owner prefix command).',
+				flags: MessageFlags.Ephemeral,
+			});
+			return;
+		}
+
+		if (services.autoService.isRunning(scope)) {
+			await interaction.reply({
+				content:
+					'A quest queue is already running - use `!quest stop` to stop it.',
+				flags: MessageFlags.Ephemeral,
+			});
+			return;
+		}
+
+		const plan = await services.autoService.planQueue(scope, { account });
+
+		const accounts = [...new Set(plan.map((job) => job.account))];
+
+		await interaction.reply({
+			content:
+				`Starting the queue with **${plan.length}** quest(s) across **${accounts.length}** account(s). ` +
+				'This takes a while - keep the Discord client open. The result is posted as an ephemeral follow-up when done.',
+			flags: MessageFlags.Ephemeral,
+		});
+
+		const summary = await services.autoService.runAll(scope, undefined, {
+			account,
+			plan,
+		});
+
+		await interaction.followUp({
+			content: [
+				'**Quest queue done**',
+				`Completed: ${summary.completed}`,
+				`Failed: ${summary.failed}`,
+				`Skipped: ${summary.skipped}`,
+				'',
+				...summary.results.map(
+					(result) =>
+						`✅ ${result.finished ? 'Done' : 'Failed'} **${result.account}** - ${result.quest}`,
+				),
+			]
+				.join('\n')
+				.slice(0, 1900),
+			flags: MessageFlags.Ephemeral,
 		});
 	}
 }
