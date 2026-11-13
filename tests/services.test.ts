@@ -88,6 +88,7 @@ test('every command group exposes the documented subcommands', () => {
 			'status',
 			'refresh',
 			'history',
+			'switch',
 		],
 		account: ['link', 'status', 'unlink', 'privacy'],
 		task: ['list', 'info', 'progress', 'verify'],

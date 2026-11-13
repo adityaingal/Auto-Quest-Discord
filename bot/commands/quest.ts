@@ -9,8 +9,10 @@ import {
 } from '../ui/components';
 import { questDetailEmbed, questListEmbed, questQueueEmbed } from '../ui/embeds';
 import type { QueueEntry } from '../ui/embeds';
-import { infoEmbed } from '../ui/embeds';
+import { infoEmbed, successEmbed } from '../ui/embeds';
 import { ELIGIBILITY_LABELS } from '../models/enums';
+import { assertAdmin } from './admin';
+import { toUserMessage } from '../utils/errors';
 
 function questOption(sub: SlashCommandSubcommandBuilder): void {
 	sub.addStringOption((option) =>
@@ -22,6 +24,21 @@ function questOption(sub: SlashCommandSubcommandBuilder): void {
 	);
 }
 
+/**
+ * The account the command works with. Without it the account that was
+ * selected with "/quest switch" is used - and if none is selected, every
+ * account works at the same time.
+ */
+function accountOption(sub: SlashCommandSubcommandBuilder): void {
+	sub.addStringOption((option) =>
+		option
+			.setName('account')
+			.setDescription('The account to use - every account when omitted')
+			.setRequired(false)
+			.setAutocomplete(true),
+	);
+}
+
 export const questCommand = group(
 	'quest',
 	'Inspect Discord quests, their requirements and rewards.',
@@ -29,9 +46,16 @@ export const questCommand = group(
 		{
 			name: 'list',
 			description: 'List the quests that are currently available.',
+			build: accountOption,
 			run: async (context: CommandContext) => {
 				const { interaction, services, userId } = context;
-				const result = await services.questService.list(userId);
+				const account = services.autoService.resolveAccount(
+					interaction.options.getString('account'),
+				);
+				const result = await services.questService.list(
+					userId,
+					account,
+				);
 				const pages = buildQuestPages(result.quests);
 				const page = 0;
 
@@ -50,11 +74,21 @@ export const questCommand = group(
 		{
 			name: 'info',
 			description: 'Show every detail of one quest.',
-			build: questOption,
+			build: (sub) => {
+				questOption(sub);
+				accountOption(sub);
+			},
 			run: async (context: CommandContext) => {
 				const { interaction, services, userId } = context;
 				const questId = interaction.options.getString('quest', true);
-				const quest = await services.questService.get(questId, userId);
+				const account = services.autoService.resolveAccount(
+					interaction.options.getString('account'),
+				);
+				const quest = await services.questService.get(
+					questId,
+					userId,
+					account,
+				);
 
 				await interaction.reply({
 					embeds: [questDetailEmbed(quest)],
@@ -112,13 +146,20 @@ export const questCommand = group(
 		{
 			name: 'status',
 			description: 'Show the status of one quest for your account.',
-			build: questOption,
+			build: (sub) => {
+				questOption(sub);
+				accountOption(sub);
+			},
 			run: async (context: CommandContext) => {
 				const { interaction, services, userId } = context;
 				const questId = interaction.options.getString('quest', true);
+				const account = services.autoService.resolveAccount(
+					interaction.options.getString('account'),
+				);
 				const quest = await services.questService.status(
 					questId,
 					userId,
+					account,
 				);
 
 				await interaction.reply({
@@ -144,13 +185,15 @@ export const questCommand = group(
 				}
 
 				const sessions = await services.autoService.describeSessions();
+				const selected = services.autoService.defaultAccount;
 
 				const lines = sessions.map((session) => {
 					const state = session.ok
 						? '🟢 active'
 						: `🔴 ${session.error ?? 'not usable'}`;
+					const marker = session.label === selected ? ' ⭐' : '';
 
-					return `**${session.label}** - ${
+					return `**${session.label}**${marker} - ${
 						session.username ?? 'unknown account'
 					} (\`${session.accountId ?? '?'}\`)\n${state} - ${
 						session.quests
@@ -166,6 +209,17 @@ export const questCommand = group(
 								: 'No user session is configured.',
 							[
 								{
+									name: 'Selected account',
+									value: selected
+										? `**${selected}** - only this account is used.`
+										: 'none - every account is used and all quests start at the same time.',
+								},
+								{
+									name: 'Switching',
+									value:
+										'`/quest switch account:<label>` selects one account, `/quest switch account:all` uses every account again.',
+								},
+								{
 									name: 'Privacy',
 									value:
 										'The tokens are encrypted on disk and are never displayed.',
@@ -178,15 +232,61 @@ export const questCommand = group(
 			},
 		},
 		{
+			name: 'switch',
+			description:
+				'Choose the account the bot works with (admins only - "all" uses every account).',
+			build: (sub) => {
+				sub.addStringOption((option) =>
+					option
+						.setName('account')
+						.setDescription('The account label or "all"')
+						.setRequired(true)
+						.setAutocomplete(true),
+				);
+			},
+			run: async (context: CommandContext) => {
+				const { interaction, services } = context;
+				assertAdmin(context);
+
+				const value = (
+					interaction.options.getString('account', true) ?? ''
+				).trim();
+
+				if (value.toLowerCase() === 'all') {
+					services.autoService.setDefaultAccount(null);
+					await interaction.reply({
+						embeds: [
+							successEmbed(
+								'Every account is used again - the quests of all accounts start at the same time.',
+							),
+						],
+						flags: MessageFlags.Ephemeral,
+					});
+					return;
+				}
+
+				services.autoService.setDefaultAccount(value);
+				await interaction.reply({
+					embeds: [
+						successEmbed(
+							`The bot now works with the account **${value}**. Every other account stays available through \`/quest all account:<label>\`.`,
+						),
+					],
+					flags: MessageFlags.Ephemeral,
+				});
+			},
+		},
+		{
 			name: 'all',
 			description:
-				'Complete every available quest automatically with a live timer.',
+				'Complete every available quest automatically - all accounts start at the same time.',
 			build: (sub) => {
 				sub.addBooleanOption((option) =>
 					option
 						.setName('stop')
 						.setDescription('Stop the running queue instead'),
 				);
+				accountOption(sub);
 			},
 			run: async (context: CommandContext) => {
 				const { interaction, services } = context;
@@ -210,18 +310,27 @@ export const questCommand = group(
 					return;
 				}
 
-				const live = await services.autoService.listLiveQuests();
-				if (!live) {
+				if (services.autoService.isRunning) {
 					await interaction.reply({
 						content:
-							'Could not read the quests of the configured account.',
+							'A quest queue is already running - stop it with `/quest all stop` first.',
 						flags: MessageFlags.Ephemeral,
 					});
 					return;
 				}
 
-				const entries: QueueEntry[] = live.quests.map((quest) => ({
-					name: quest.config.messages.quest_name,
+				const account = services.autoService.resolveAccount(
+					interaction.options.getString('account'),
+				);
+
+				// The plan is fetched once, so the queue view and the
+				// progress that is reported later always match.
+				const plan = await services.autoService.planQueue({ account });
+				const accounts = [...new Set(plan.map((job) => job.account))];
+
+				const entries: QueueEntry[] = plan.map((job) => ({
+					name: job.quest.config.messages.quest_name,
+					account: job.account,
 					taskType: null,
 					value: 0,
 					target: 0,
@@ -230,7 +339,7 @@ export const questCommand = group(
 
 				const response = await interaction.reply({
 					embeds: [
-						questQueueEmbed(entries, live.account, 0, entries.length),
+						questQueueEmbed(entries, accounts, 0, entries.length),
 					],
 					flags: MessageFlags.Ephemeral,
 				});
@@ -249,7 +358,7 @@ export const questCommand = group(
 				const publish = async () => {
 					const embed = questQueueEmbed(
 						entries,
-						live.account,
+						accounts,
 						done,
 						entries.length,
 					);
@@ -279,37 +388,51 @@ export const questCommand = group(
 					}
 				};
 
-				const summary = await services.autoService.runAll(
-					async (quest, progress, index, total) => {
-						const entry = entries[index];
-						if (!entry) return;
+				let summary: Awaited<
+					ReturnType<typeof services.autoService.runAll>
+				>;
 
-						entry.name = quest.config.messages.quest_name;
-						entry.taskType = progress.taskType;
-						entry.value = progress.value;
-						entry.target = progress.target;
-						entry.state = progress.state;
+				try {
+					summary = await services.autoService.runAll(
+						async (quest, progress, index) => {
+							const entry = entries[index];
+							if (!entry) return;
 
-						if (progress.state === 'done') {
-							done++;
+							entry.name = quest.config.messages.quest_name;
+							entry.taskType = progress.taskType;
+							entry.value = progress.value;
+							entry.target = progress.target;
+							entry.state = progress.state;
 
-							// Announce it right away - in the channel and
-							// as a direct message.
-							await services.notifier.send(
-								`✅ **Quest completed**: \`${quest.config.messages.quest_name}\`\nClaim the reward in the Discord client.`,
-							);
+							if (progress.state === 'done') {
+								done++;
+
+								// Announce it right away - in the channel
+								// and as a direct message.
+								await services.notifier.send(
+									`✅ **Quest completed**: \`${quest.config.messages.quest_name}\`\nClaim the reward in the Discord client.`,
+								);
+								await publish();
+								return;
+							}
+
+							// Discord rate limits message edits - 5 seconds
+							// is safe.
+							const now = Date.now();
+							if (now - lastEdit < 5000) return;
+							lastEdit = now;
+
 							await publish();
-							return;
-						}
-
-						// Discord rate limits message edits - 5 seconds is safe.
-						const now = Date.now();
-						if (now - lastEdit < 5000) return;
-						lastEdit = now;
-
-						await publish();
-					},
-				);
+						},
+						{ account, plan },
+					);
+				} catch (error) {
+					await interaction.followUp({
+						content: toUserMessage(error),
+						flags: MessageFlags.Ephemeral,
+					});
+					return;
+				}
 
 				entries.forEach((entry) => {
 					if (entry.state === 'queued') entry.state = 'skipped';
@@ -321,6 +444,7 @@ export const questCommand = group(
 					content:
 						`🏁 **${summary.completed}** quest(s) completed, ` +
 						`**${summary.failed}** failed, **${summary.skipped}** skipped.\n` +
+						`Accounts: ${accounts.join(', ') || 'none'}.\n` +
 						'Claim the rewards in the Discord client.',
 					flags: MessageFlags.Ephemeral,
 				});
@@ -330,7 +454,10 @@ export const questCommand = group(
 			name: 'auto',
 			description:
 				'Complete a quest automatically (needs a configured user session).',
-			build: questOption,
+			build: (sub) => {
+				questOption(sub);
+				accountOption(sub);
+			},
 			run: async (context: CommandContext) => {
 				const { interaction, services } = context;
 
@@ -343,40 +470,72 @@ export const questCommand = group(
 					return;
 				}
 
-				const live = await services.autoService.listLiveQuests();
-				const questId = interaction.options.getString('quest', true);
-				const quest =
-					live?.quests.find((entry) => entry.id === questId) ??
-					live?.quests.find((entry) =>
-						entry.config.messages.quest_name
-							.toLowerCase()
-							.includes(questId.toLowerCase()),
-					);
-
-				if (!quest || !live) {
+				if (services.autoService.isRunning) {
 					await interaction.reply({
 						content:
-							'That quest is not available for the configured account.',
+							'A quest queue is already running - stop it with `/quest all stop` first.',
 						flags: MessageFlags.Ephemeral,
 					});
 					return;
 				}
 
+				const account = services.autoService.resolveAccount(
+					interaction.options.getString('account'),
+				);
+				const questId = interaction.options.getString('quest', true);
+
+				// Every account that offers the quest works on it - they all
+				// start at the same time.
+				const plan = await services.autoService.planQueue({
+					account,
+					quest: questId,
+				});
+
+				if (plan.length === 0) {
+					await interaction.reply({
+						content:
+							'That quest is not available for the selected account.',
+						flags: MessageFlags.Ephemeral,
+					});
+					return;
+				}
+
+				const accounts = [...new Set(plan.map((job) => job.account))];
+				const name = plan[0].quest.config.messages.quest_name;
+
 				await interaction.reply({
 					content:
-						`Working on **${quest.config.messages.quest_name}** (account \`${live.account}\`) - this can take a while. The bot will report back when it is done.`,
+						`Working on **${name}** (accounts: ${accounts.join(
+							', ',
+						)}) - this can take a while. The bot will report back when it is done.`,
 					flags: MessageFlags.Ephemeral,
 				});
 
-				const result = await services.autoService.run(
-					quest,
-					live.account,
+				let summary: Awaited<
+					ReturnType<typeof services.autoService.runAll>
+				>;
+
+				try {
+					summary = await services.autoService.runAll(undefined, {
+						account,
+						quest: questId,
+						plan,
+					});
+				} catch (error) {
+					await interaction.followUp({
+						content: toUserMessage(error),
+						flags: MessageFlags.Ephemeral,
+					});
+					return;
+				}
+
+				const lines = summary.results.map(
+					(result) =>
+						`${result.finished ? '✅' : '⚠️'} **${result.account}** - ${result.quest}: ${result.message}`,
 				);
 
 				await interaction.followUp({
-					content: result.finished
-						? `✅ ${result.message}`
-						: `⚠️ ${result.message}`,
+					content: lines.join('\n').slice(0, 1900),
 					flags: MessageFlags.Ephemeral,
 				});
 			},

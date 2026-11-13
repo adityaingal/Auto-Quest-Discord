@@ -17,6 +17,9 @@ import { AutoService, SessionEntry } from './autoService';
 import { Notifier } from './notifier';
 import { UserSession } from '../integrations/userSession';
 
+/** The configuration key that holds the account the commands work with. */
+export const DEFAULT_ACCOUNT_KEY = 'auto.default_account';
+
 export type Services = {
 	config: Config;
 	database: Database;
@@ -73,26 +76,51 @@ export function createServices(
 	// environment variable or from the user tokens registered with
 	// "/token add" (type user). The list is resolved on every use, so a token
 	// that was just registered works immediately.
-	const autoService = new AutoService(() => {		const sessions: SessionEntry[] = [];
+	//
+	// The session objects are cached per label, so the encrypted tokens are
+	// not decrypted again for every single request. A token that was replaced
+	// under the same label gets a new session.
+	const sessionCache = new Map<string, { token: string; session: UserSession }>();
 
-		const envSession = UserSession.fromEnvironment();
-		if (envSession) {
-			sessions.push({ label: 'USER_TOKEN', session: envSession });
-		}
+	const autoService = new AutoService(
+		() => {
+			const sessions: SessionEntry[] = [];
 
-		for (const entry of tokenService.resolveUserSessions()) {
-			if (sessions.some((existing) => existing.label === entry.label)) {
-				continue;
+			const envSession = UserSession.fromEnvironment();
+			if (envSession) {
+				sessions.push({ label: 'USER_TOKEN', session: envSession });
 			}
 
-			sessions.push({
-				label: entry.label,
-				session: new UserSession(entry.token),
-			});
-		}
+			for (const entry of tokenService.resolveUserSessions()) {
+				if (sessions.some((existing) => existing.label === entry.label)) {
+					continue;
+				}
 
-		return sessions;
-	});
+				const cached = sessionCache.get(entry.label);
+				if (!cached || cached.token !== entry.token) {
+					sessionCache.set(entry.label, {
+						token: entry.token,
+						session: new UserSession(entry.token),
+					});
+				}
+
+				sessions.push({
+					label: entry.label,
+					session: sessionCache.get(entry.label)!.session,
+				});
+			}
+
+			return sessions;
+		},
+		{
+			// The account the commands work with. It survives a restart.
+			readDefaultAccount: () =>
+				repositories.getConfig(DEFAULT_ACCOUNT_KEY) || null,
+			writeDefaultAccount: (label) => {
+				repositories.setConfig(DEFAULT_ACCOUNT_KEY, label ?? '');
+			},
+		},
+	);
 
 	const questService = new QuestService(
 		repositories,

@@ -43,16 +43,36 @@ export class QuestService {
 	}
 
 	/**
+	 * The user session the live data is read from: the named account, the
+	 * account selected with "/quest switch" or - when nothing is selected -
+	 * the first account that answers.
+	 */
+	private liveAccount(account?: string | null): string | undefined {
+		const wanted = account?.trim();
+		if (wanted) return wanted;
+
+		return this.autoService?.defaultAccount ?? undefined;
+	}
+
+	/**
 	 * Lists quests. Live data is preferred when the user has a linked account
 	 * and Discord actually serves it, otherwise the catalogue is used.
+	 *
+	 * `account` selects the user session the live data is read from. Without
+	 * it the account selected with "/quest switch" is used.
 	 */
-	async list(discordUserId: string): Promise<{
+	async list(
+		discordUserId: string,
+		account?: string | null,
+	): Promise<{
 		quests: QuestView[];
 		source: string;
 		live: boolean;
 	}> {
 		// A configured user session serves the real quest list of the account.
-		const live = await this.autoService?.listLiveQuests();
+		const live = await this.autoService?.listLiveQuests(
+			this.liveAccount(account),
+		);
 		if (live && live.quests.length > 0) {
 			return {
 				quests: live.quests.map((quest) => toQuestViewFromPayload(quest)),
@@ -75,10 +95,13 @@ export class QuestService {
 	async get(
 		questId: string,
 		discordUserId: string,
+		account?: string | null,
 	): Promise<QuestDetail> {
 		// Live quests of the configured account come first - their ids differ
 		// from the catalogue snapshot.
-		const live = await this.autoService?.listLiveQuests();
+		const live = await this.autoService?.listLiveQuests(
+			this.liveAccount(account),
+		);
 		const liveQuest = live?.quests.find(
 			(entry) =>
 				entry.id === questId ||
@@ -110,8 +133,9 @@ export class QuestService {
 	async status(
 		questId: string,
 		discordUserId: string,
+		account?: string | null,
 	): Promise<QuestDetail> {
-		const quest = await this.get(questId, discordUserId);
+		const quest = await this.get(questId, discordUserId, account);
 		const stored = this.repositories.getProgress(discordUserId, questId);
 
 		if (stored && !quest.progress) {

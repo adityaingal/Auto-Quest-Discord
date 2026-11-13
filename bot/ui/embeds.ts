@@ -214,6 +214,8 @@ export function progressEmbed(
 
 export type QueueEntry = {
 	name: string;
+	/** The account the quest belongs to. */
+	account: string;
 	taskType: string | null;
 	value: number;
 	target: number;
@@ -226,17 +228,27 @@ export type QueueEntry = {
  */
 export function questQueueEmbed(
 	entries: QueueEntry[],
-	account: string | null,
+	accounts: string | string[] | null,
 	done = 0,
 	total = 0,
 ): EmbedBuilder {
+	const names = accounts
+		? Array.isArray(accounts)
+			? accounts
+			: [accounts]
+		: [];
+
 	const embed = new EmbedBuilder()
 		.setColor(COLORS.primary)
 		.setTitle('QUEST QUEUE')
 		.setDescription(
-			account
-				? `Working through the quests of **${account}**.`
-				: 'Working through the quests.',
+			names.length === 0
+				? 'Working through the quests.'
+				: names.length === 1
+					? `Working through the quests of **${names[0]}**.`
+					: `Working through the quests of **${names.join(
+							', ',
+						)}** - all accounts started at the same time.`,
 		)
 		.setTimestamp();
 
@@ -260,7 +272,9 @@ export function questQueueEmbed(
 				: 0;
 		const remaining = Math.max(0, entry.target - entry.value);
 
-		return `${icons[entry.state]} **${index + 1}. ${entry.name}**\n` +
+		return `${icons[entry.state]} **${index + 1}. ${entry.name}** (\`${
+			entry.account
+		}\`)\n` +
 			`\`${entry.taskType ?? 'unknown'}\` ${renderProgressBar(percent, 12)} - ${
 				entry.state === 'done'
 					? 'done'

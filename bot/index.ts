@@ -206,6 +206,13 @@ async function main(): Promise<void> {
 		Logger.info(
 			`User sessions available: ${sessionLabels.join(', ')}`,
 		);
+
+		const selected = services.autoService.defaultAccount;
+		Logger.info(
+			selected
+				? `Selected account: ${selected} ("/quest switch account:all" uses every account again)`
+				: 'No account selected - the quests of every account start at the same time.',
+		);
 	} else {
 		Logger.warn(
 			'No user session configured - /quest auto and /quest all stay disabled. ' +
@@ -380,6 +387,38 @@ async function handleAutocomplete(
 				);
 			}
 
+			return;
+		}
+
+		if (focused.name === 'account') {
+			const accounts = services.autoService.accounts;
+			const choices: { name: string; value: string }[] = [];
+
+			// "all" is always offered - it switches back to every account.
+			if (
+				value.length === 0 ||
+				'all'.startsWith(value.toLowerCase())
+			) {
+				choices.push({ name: 'all (every account)', value: 'all' });
+			}
+
+			for (const account of accounts) {
+				if (
+					value.length === 0 ||
+					account.toLowerCase().includes(value.toLowerCase())
+				) {
+					choices.push({ name: account.slice(0, 100), value: account });
+				}
+			}
+
+			if (choices.length === 0) {
+				await interaction.respond([
+					{ name: value.slice(0, 100), value: value.slice(0, 100) },
+				]);
+				return;
+			}
+
+			await interaction.respond(choices.slice(0, 25));
 			return;
 		}
 
