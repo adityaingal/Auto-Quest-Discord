@@ -300,8 +300,8 @@ export type QueueEntry = {
 };
 
 /**
- * Live queue view for "/quest all": one line per quest with a progress bar
- * and the remaining time.
+ * Live queue view for the Complete All button: one line per quest with a
+ * progress bar and the state of the item.
  */
 export function questQueueEmbed(
 	entries: QueueEntry[],

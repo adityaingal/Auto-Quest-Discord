@@ -12,9 +12,12 @@ import { AccountScope } from '../services/scope';
 import { Logger } from '../utils/logger';
 import { toUserMessage } from '../utils/errors';
 import { buildQuestPages, buildQuestSelect, buildPagingRow } from '../ui/components';
-import { errorEmbed, infoEmbed, questDetailEmbed, questListEmbed, progressEmbed } from '../ui/embeds';
+import { errorEmbed, infoEmbed, questDetailEmbed, questListEmbed, questQueueEmbed, progressEmbed } from '../ui/embeds';
 import { isAdmin } from './admin';
 import { renderQuestPanel, decodeSegment } from '../ui/panel';
+import type { QueueEntry } from '../ui/embeds';
+import type { QueueJob, AutoProgress } from '../services/autoService';
+import type { QuestPayload } from '../integrations/userSession';
 
 type Handler = (
 	interaction: Interaction,
@@ -568,9 +571,9 @@ export class InteractionRouter {
 	}
 
 	/**
-	 * The Complete All button. It runs the automation for every account of
-	 * the scope, one after another, until the queue is empty or the user
-	 * stops it. The reply is ephemeral - nobody else sees the progress.
+	 * The Complete All button. It shows which quests are queued for the
+	 * user's scope, runs them (with a live, throttled progress embed) and
+	 * finishes with a summary. The reply is ephemeral - nobody else sees it.
 	 */
 	private async handleCompleteAll(
 		interaction: Interaction,
@@ -601,35 +604,151 @@ export class InteractionRouter {
 		}
 
 		const plan = await services.autoService.planQueue(scope, { account });
-
 		const accounts = [...new Set(plan.map((job) => job.account))];
 
+		if (plan.length === 0) {
+			await interaction.reply({
+				embeds: [
+					infoEmbed(
+						'NOTHING TO DO',
+						'There are no quests available for your accounts right now. The catalogue changes over time - try again later.',
+					),
+				],
+				flags: MessageFlags.Ephemeral,
+			});
+			return;
+		}
+
+		// The live view.
+		const entries: QueueEntry[] = plan.map((job) => ({
+			name: job.quest.config.messages.quest_name,
+			account: job.account,
+			taskType: job.quest.config.task_config_v2?.tasks
+				? Object.keys(job.quest.config.task_config_v2.tasks)[0] ?? null
+				: null,
+			value: 0,
+			target: 0,
+			state: 'queued',
+		}));
+
+		const publish = async () => {
+			const done = entries.filter(
+				(entry) => entry.state === 'done',
+			).length;
+
+			// Discord refuses more than 5 buttons on a message, so the
+			// live view has no buttons - it is just the embed.
+			const embed = questQueueEmbed(
+				entries.slice(0, 15),
+				accounts,
+				done,
+				entries.length,
+			);
+
+			return embed;
+		};
+
 		await interaction.reply({
-			content:
-				`Starting the queue with **${plan.length}** quest(s) across **${accounts.length}** account(s). ` +
-				'This takes a while - keep the Discord client open. The result is posted as an ephemeral follow-up when done.',
+			embeds: [await publish()],
 			flags: MessageFlags.Ephemeral,
 		});
 
-		const summary = await services.autoService.runAll(scope, undefined, {
-			account,
-			plan,
-		});
+		let summary: Awaited<
+			ReturnType<typeof services.autoService.runAll>
+		> | null = null;
+		let lastEdit = 0;
+
+		const live = async (
+			_quest: QuestPayload,
+			progress: {
+				value: number;
+				target: number;
+				taskType: string | null;
+				state: QueueEntry['state'];
+			},
+			index: number,
+		) => {
+			const entry = entries[index];
+			if (!entry) return;
+
+			entry.taskType = progress.taskType;
+			entry.value = progress.value;
+			entry.target = progress.target;
+			entry.state = progress.state as QueueEntry['state'];
+
+			// Throttle edits - Discord only allows a few per second.
+			const now = Date.now();
+			if (now - lastEdit < 1500) return;
+			lastEdit = now;
+
+			try {
+				await interaction.editReply({
+					embeds: [await publish()],
+				});
+			} catch {
+				// The interaction expired - the follow-up reports the result.
+			}
+		};
+
+		try {
+			summary = await services.autoService.runAll(
+				scope,
+				async (quest, progress, index) => {
+					const state: QueueEntry['state'] =
+						progress.state === 'queued'
+							? 'queued'
+							: progress.state === 'running'
+								? 'running'
+								: progress.state === 'done'
+									? 'done'
+									: progress.state === 'failed'
+										? 'failed'
+										: 'skipped';
+
+					await live(quest, { ...progress, state }, index);
+				},
+				{ account, plan },
+			);
+		} catch (error) {
+			Logger.error(
+				`The complete-all queue failed: ${(error as Error).message}`,
+			);
+		}
+
+		// The final state of every quest.
+		for (const result of summary?.results ?? []) {
+			const entry = entries.find((candidate) =>
+				candidate.name.toLowerCase().includes(
+					result.quest.toLowerCase(),
+				),
+			);
+
+			if (entry) {
+				entry.state = result.finished ? 'done' : 'failed';
+			}
+		}
+
+		const done = entries.filter((entry) => entry.state === 'done').length;
+		const final = questQueueEmbed(
+			entries.slice(0, 15),
+			accounts,
+			done,
+			entries.length,
+		);
+
+		try {
+			await interaction.editReply({ embeds: [final] });
+		} catch {
+			// The interaction expired - report via a new message.
+		}
 
 		await interaction.followUp({
 			content: [
 				'**Quest queue done**',
-				`Completed: ${summary.completed}`,
-				`Failed: ${summary.failed}`,
-				`Skipped: ${summary.skipped}`,
-				'',
-				...summary.results.map(
-					(result) =>
-						`✅ ${result.finished ? 'Done' : 'Failed'} **${result.account}** - ${result.quest}`,
-				),
-			]
-				.join('\n')
-				.slice(0, 1900),
+				`Completed: ${summary?.completed ?? 0}`,
+				`Failed: ${summary?.failed ?? 0}`,
+				`Skipped: ${summary?.skipped ?? 0}`,
+			].join('\n'),
 			flags: MessageFlags.Ephemeral,
 		});
 	}
