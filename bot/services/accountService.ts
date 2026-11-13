@@ -120,9 +120,11 @@ export class AccountService {
 	private async fetchIdentity(
 		accessToken: string,
 	): Promise<{ id: string; username: string }> {
+		// OAuth2 access tokens are sent as "Bearer <token>" - a raw token
+		// would be treated as a user token and rejected with 401.
 		const response = await fetch(
 			'https://discord.com/api/v10/users/@me',
-			{ headers: { Authorization: accessToken } },
+			{ headers: { Authorization: `Bearer ${accessToken}` } },
 		);
 
 		if (!response.ok) {
