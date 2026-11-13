@@ -572,17 +572,33 @@ export class Repositories {
 		entry_id: string;
 		label: string | null;
 		added_by: string | null;
+		role?: 'member' | 'admin';
 	}): void {
 		this.db.run(
-			`INSERT INTO whitelist (kind, entry_id, label, added_by)
-			 VALUES (?, ?, ?, ?)
+			`INSERT INTO whitelist (kind, entry_id, label, added_by, role)
+			 VALUES (?, ?, ?, ?, ?)
 			 ON CONFLICT(kind, entry_id) DO UPDATE SET
 				label = excluded.label,
-				added_by = excluded.added_by`,
+				added_by = excluded.added_by,
+				role = excluded.role`,
 			entry.kind,
 			entry.entry_id,
 			entry.label,
 			entry.added_by,
+			entry.role ?? 'member',
+		);
+	}
+
+	setWhitelistRole(
+		kind: 'guild' | 'user',
+		entryId: string,
+		role: 'member' | 'admin',
+	): void {
+		this.db.run(
+			'UPDATE whitelist SET role = ? WHERE kind = ? AND entry_id = ?',
+			role,
+			kind,
+			entryId,
 		);
 	}
 
@@ -592,6 +608,7 @@ export class Repositories {
 		entry_id: string;
 		label: string | null;
 		added_by: string | null;
+		role: string;
 		created_at: string;
 	}[] {
 		return kind

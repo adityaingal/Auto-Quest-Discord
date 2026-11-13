@@ -16,6 +16,11 @@ export function isAdmin(context: CommandContext): boolean {
 		return true;
 	}
 
+	// A whitelisted user with the "admin" role is treated as an admin.
+	if (services.adminService.isWhitelistedAdmin(userId)) {
+		return true;
+	}
+
 	const adminRoleId = services.config.adminRoleId;
 	if (!adminRoleId) return false;
 
@@ -358,6 +363,8 @@ export const adminCommand: CommandDefinition = group(
 										(entry) =>
 											`\`${entry.kind}\` **${
 												entry.label ?? entry.entry_id
+											}** - role: **${
+												entry.role
 											}**\n\`${entry.entry_id}\` - added by ${
 												entry.added_by ?? 'unknown'
 											} on ${entry.created_at}`,
@@ -402,11 +409,103 @@ export const adminCommand: CommandDefinition = group(
 								.setDescription('The guild id or the user id')
 								.setRequired(true),
 						);
+					sub.addStringOption((option) =>
+						option
+							.setName('label')
+							.setDescription('A name for this entry')
+							.setRequired(false),
+					);
+					sub.addStringOption((option) =>
+						option
+							.setName('role')
+							.setDescription('The access role for this entry')
+							.setRequired(false)
+							.addChoices(
+								{ name: 'member', value: 'member' },
+								{ name: 'admin', value: 'admin' },
+							),
+					);
+				},
+				run: async (context: CommandContext) => {
+						assertAdmin(context);
+						const kind = context.interaction.options.getString(
+							'kind',
+							true,
+						) as 'guild' | 'user';
+						const id = context.interaction.options.getString(
+							'id',
+							true,
+						).trim();
+					const label =
+						context.interaction.options.getString('label') ??
+						null;
+					const role =
+						(context.interaction.options.getString(
+							'role',
+						) as 'member' | 'admin' | null) ?? 'member';
+
+					if (!/^\d{15,25}$/.test(id)) {
+							await context.interaction.reply({
+								content:
+									'That does not look like a Discord id (it should be 17-20 digits).',
+								flags: MessageFlags.Ephemeral,
+							});
+							return;
+						}
+
+					context.services.adminService.addWhitelist(
+						kind,
+						id,
+						label,
+						context.userId,
+						role,
+					);
+						context.services.adminService.audit(
+							context.userId,
+							'whitelist_add',
+							`${kind}:${id}`,
+						);
+
+						await context.interaction.reply({
+							embeds: [
+								successEmbed(
+									`Added the ${kind} \`${id}\` to the whitelist.`,
+								),
+							],
+							flags: MessageFlags.Ephemeral,
+						});
+					},
+				},
+				{
+					name: 'role',
+					description:
+						'Change the role (member/admin) of a whitelisted entry.',
+					build: (sub) => {
 						sub.addStringOption((option) =>
 							option
-								.setName('label')
-								.setDescription('A name for this entry')
-								.setRequired(false),
+								.setName('kind')
+								.setDescription('What the entry is')
+								.setRequired(true)
+								.addChoices(
+									{ name: 'guild', value: 'guild' },
+									{ name: 'user', value: 'user' },
+								),
+						);
+						sub.addStringOption((option) =>
+							option
+								.setName('id')
+								.setDescription('The guild id or the user id')
+								.setRequired(true),
+						);
+						sub.addStringOption((option) =>
+							option
+								.setName('role')
+								.setDescription('The new role for this entry')
+								.setRequired(true)
+								.addChoices(
+									{ name: 'member', value: 'member' },
+									{ name: 'admin', value: 'admin' },
+								),
 						);
 					},
 					run: async (context: CommandContext) => {
@@ -419,35 +518,38 @@ export const adminCommand: CommandDefinition = group(
 							'id',
 							true,
 						).trim();
-						const label =
-							context.interaction.options.getString('label') ??
-							null;
+						const role = context.interaction.options.getString(
+							'role',
+							true,
+						) as 'member' | 'admin';
 
-						if (!/^\d{15,25}$/.test(id)) {
+						const entries = context.services.adminService.whitelist(
+							kind,
+						);
+
+						if (!entries.some((entry) => entry.entry_id === id)) {
 							await context.interaction.reply({
-								content:
-									'That does not look like a Discord id (it should be 17-20 digits).',
+								content: `\`${id}\` is not on the whitelist.`,
 								flags: MessageFlags.Ephemeral,
 							});
 							return;
 						}
 
-						context.services.adminService.addWhitelist(
+						context.services.adminService.setWhitelistRole(
 							kind,
 							id,
-							label,
-							context.userId,
+							role,
 						);
 						context.services.adminService.audit(
 							context.userId,
-							'whitelist_add',
-							`${kind}:${id}`,
+							'whitelist_role',
+							`${kind}:${id}=${role}`,
 						);
 
 						await context.interaction.reply({
 							embeds: [
 								successEmbed(
-									`Added the ${kind} \`${id}\` to the whitelist.`,
+									`The ${kind} \`${id}\` now has the **${role}** role.`,
 								),
 							],
 							flags: MessageFlags.Ephemeral,

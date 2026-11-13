@@ -179,6 +179,13 @@ export const MIGRATIONS: Migration[] = [
 			);
 		`,
 	},
+	{
+		version: 5,
+		name: 'whitelist_roles',
+		sql: `
+			ALTER TABLE whitelist ADD COLUMN role TEXT NOT NULL DEFAULT 'member';
+		`,
+	},
 ];
 
 export class Database {

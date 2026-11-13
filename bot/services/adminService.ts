@@ -143,6 +143,18 @@ export class AdminService {
 		return enabled;
 	}
 
+	/**
+	 * A whitelisted user carries the "admin" role by default unless the
+	 * administrator chose otherwise.
+	 */
+	isWhitelistedAdmin(userId: string): boolean {
+		return this.repositories
+			.listWhitelist('user')
+			.some(
+				(entry) => entry.entry_id === userId && entry.role === 'admin',
+			);
+	}
+
 	whitelist(kind?: 'guild' | 'user') {
 		return this.repositories.listWhitelist(kind);
 	}
@@ -152,13 +164,23 @@ export class AdminService {
 		entryId: string,
 		label: string | null,
 		actorId: string | null,
+		role?: 'member' | 'admin',
 	): void {
 		this.repositories.addWhitelist({
 			kind,
 			entry_id: entryId,
 			label,
 			added_by: actorId,
+			role,
 		});
+	}
+
+	setWhitelistRole(
+		kind: 'guild' | 'user',
+		entryId: string,
+		role: 'member' | 'admin',
+	): void {
+		this.repositories.setWhitelistRole(kind, entryId, role);
 	}
 
 	removeWhitelist(kind: 'guild' | 'user', entryId: string): boolean {
