@@ -186,7 +186,7 @@ export const questCommand = group(
 				if (!services.autoService.enabled(scope)) {
 					await interaction.reply({
 						content:
-							'You have no account yet. Add one with `/room add`, or use `/token add` if you are an admin.',
+							'You have no account yet. Add one with `/token add` (owner only).',
 						flags: MessageFlags.Ephemeral,
 					});
 					return;

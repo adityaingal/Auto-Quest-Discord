@@ -12,11 +12,14 @@ import { rewardCommand } from './reward';
  * the owner and runs as a prefix command instead (see ./prefix.ts) - the
  * users only ever see the commands that act on their own account.
  */
+import { tokenCommand } from './token';
+
 export const commands: CommandDefinition[] = [
 	questCommand,
 	accountCommand,
 	taskCommand,
 	rewardCommand,
+	tokenCommand,
 ];
 
 export const commandNames = commands.map((command) => command.data.name);

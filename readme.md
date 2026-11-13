@@ -254,6 +254,15 @@ is not available to the users of the bot.
 | `/reward claim` | Start the official claim flow (human captcha when Discord asks) |
 | `/reward code` | Fetch a claimed reward code through the Discord API |
 
+### `/token` (administrators only)
+
+| Subcommand | Description |
+| --- | --- |
+| `/token add <label> <token> <bot\|user>` | Register a token. The bot owner gets the full command list; this subcommand is hidden from regular members |
+
+`/token` is the only slash command locked to administrators. Every other
+token and admin command uses the `!` prefix (`!token`, `!admin`, `!whitelist`, `!room`).
+
 ---
 
 ## Architecture
@@ -371,9 +380,9 @@ The scope is passed explicitly down to the services. There is no global
 
 The quest endpoints are user-session endpoints, so the bot needs a user token:
 
-* the owner adds accounts with `!room add <room> <token>`, or
+* the owner adds accounts with `/token add <label> <token> user`, or
 * the operator sets `USER_TOKEN=<token>` in the environment, or
-* the operator uses `!token add main <token> user` (stored encrypted).
+* the operator uses `!token add main <token> user` (stored encrypted, prefix command).
 
 The same `ENCRYPTION_KEY` has to be used on every instance, so a token
 registered on one instance stays readable on the others.

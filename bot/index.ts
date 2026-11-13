@@ -255,8 +255,9 @@ async function main(): Promise<void> {
 		);
 	} else {
 		Logger.warn(
-			'No user session configured - /quest auto and /quest all stay disabled. ' +
-				'Add one with "/room add" (per user) or "/token add <label> <token> user" (operator).',
+		'No user session configured - /quest auto and /quest all stay disabled. ' +
+			'Add one with "/token add <label> <token> user" (operator) once the bot is deployed, ' +
+			'or through `!token add` / `!room add` (owner prefix commands).',
 		);
 	}
 

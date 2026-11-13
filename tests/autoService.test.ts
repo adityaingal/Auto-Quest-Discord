@@ -147,7 +147,7 @@ test('without a session the automation explains itself', async () => {
 	);
 
 	assert.equal(result.finished, false);
-	assert.ok(result.message.includes('/room add'));
+	assert.ok(result.message.includes('/token add'));
 });
 
 test('the enabled flag follows the session list', () => {

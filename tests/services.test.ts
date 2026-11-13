@@ -68,12 +68,13 @@ function services() {
 	};
 }
 
-test('all four public command groups are registered', () => {
+test('all five public command groups are registered', () => {
 	assert.deepEqual(commandNames.sort(), [
 		'account',
 		'quest',
 		'reward',
 		'task',
+		'token',
 	]);
 });
 
@@ -98,6 +99,7 @@ test('every public command group exposes the documented subcommands', () => {
 		account: ['link', 'status', 'unlink', 'privacy'],
 		task: ['list', 'info', 'progress', 'verify'],
 		reward: ['list', 'info', 'status', 'claim', 'code'],
+		token: ['add'],
 	};
 
 	for (const command of commands) {
@@ -116,9 +118,8 @@ test('every public command group exposes the documented subcommands', () => {
 	}
 });
 
-test('neither the admin nor the token commands are public', () => {
+test('the admin and room commands are owner prefix commands, not public slash commands', () => {
 	assert.ok(!commandNames.includes('admin'));
-	assert.ok(!commandNames.includes('token'));
 	assert.ok(!commandNames.includes('room'));
 });
 

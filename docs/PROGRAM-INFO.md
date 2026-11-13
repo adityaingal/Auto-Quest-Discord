@@ -252,6 +252,12 @@ administrative commands are owner-only prefix commands (default prefix `!`).
 | `!room delete <room>` | Delete a room and its accounts |
 | `!room renew <room>` | Reset the 30 day timer |
 
+### `/token` (administrators only)
+
+| Slash command | Purpose |
+| --- | --- |
+| `/token add <label> <token> <type>` | Register a bot or user token - hidden from regular members by `setDefaultMemberPermissions(Administrator)` |
+
 ### Token prefix commands (owner only)
 
 | Prefix command | Purpose |
