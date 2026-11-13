@@ -180,6 +180,18 @@ test('the config loads and defaults every optional value', () => {
 	assert.equal(config.encryptionKey.length, 32);
 });
 
+test('the config parses several owners, comma separated', () => {
+	const config = loadConfig({
+		DISCORD_BOT_TOKEN: 'token',
+		DISCORD_CLIENT_ID: '1',
+		ENCRYPTION_KEY: 'a-secret-that-is-long-enough',
+		OWNER_ID: '111, 222, 333',
+		DOTENV_PATH: '.env.does-not-exist',
+	} as NodeJS.ProcessEnv);
+
+	assert.deepEqual(config.ownerIds, ['111', '222', '333']);
+});
+
 test('the encryption key differs between two secrets', () => {
 	const first = loadConfig({
 		DISCORD_BOT_TOKEN: 'token',

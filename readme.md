@@ -69,7 +69,7 @@ DISCORD_BOT_TOKEN=your-bot-token
 DISCORD_CLIENT_ID=123456789012345678
 DISCORD_CLIENT_SECRET=your-client-secret
 DISCORD_REDIRECT_URI=http://localhost:3000/oauth/callback
-OWNER_ID=your-discord-user-id
+OWNER_ID=your-discord-user-id,second-owner-user-id
 ENCRYPTION_KEY=some-long-random-string
 ```
 
@@ -271,7 +271,7 @@ The scope is passed explicitly down to the services. There is no global
 | `ENCRYPTION_KEY` | yes | - | key for the token vault - the bot refuses to start without it |
 | `DISCORD_CLIENT_SECRET` | no | - | needed for `/account link` |
 | `DISCORD_REDIRECT_URI` | no | - | OAuth2 redirect target |
-| `OWNER_ID` | no | - | full admin access |
+| `OWNER_ID` | no | - | full admin access - several ids, comma separated |
 | `ADMIN_ROLE_ID` | no | - | role that may use `/admin` |
 | `GUILD_ID` | no | - | guild scoped command registration |
 | `DATABASE_PATH` | no | `data/quest-bot.sqlite` | SQLite file |
@@ -309,6 +309,8 @@ The scope is passed explicitly down to the services. There is no global
 3. Add the environment variables (`DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID`,
    `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`, `OWNER_ID`,
    `ENCRYPTION_KEY`, `GUILD_ID`, `DATABASE_PATH=/var/data/quest-bot.sqlite`).
+   `OWNER_ID` accepts several ids, comma separated - each id gets the same
+   full access.
 4. Set `DISCORD_REDIRECT_URI` to `https://<your-service>.onrender.com/oauth/callback`
    and add the same URL in the Developer Portal.
 5. The blueprint creates a 1 GB disk mounted at `/var/data`; set

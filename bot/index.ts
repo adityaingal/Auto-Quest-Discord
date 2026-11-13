@@ -220,7 +220,7 @@ async function main(): Promise<void> {
 	Logger.info(`OAuth2 client id: ${config.clientId}`);
 
 	// The user sessions that can read quests and run the automation.
-	const operatorScope = services.scopeFor(config.ownerId ?? 'operator');
+	const operatorScope = services.scopeFor(config.ownerIds[0] ?? 'operator');
 	const sessionLabels = services.autoService.accounts(operatorScope);
 	if (sessionLabels.length > 0) {
 		Logger.info(

@@ -12,7 +12,7 @@ function createAdmin() {
 
 	const config = {
 		databasePath: ':memory:',
-		ownerId: '111',
+		ownerIds: ['111'],
 		adminRoleId: null,
 	} as Config;
 

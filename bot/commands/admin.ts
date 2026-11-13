@@ -24,7 +24,7 @@ export type AdminCheck = {
 export function isAdmin(context: AdminCheck): boolean {
 	const { services, userId, member } = context;
 
-	if (services.config.ownerId && userId === services.config.ownerId) {
+	if (services.config.ownerIds.includes(userId)) {
 		return true;
 	}
 

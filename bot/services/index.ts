@@ -108,7 +108,7 @@ export function createServices(
 	 */
 	const scopeFor = (userId: string): AccountScope => {
 		const isOperator =
-			Boolean(config.ownerId && config.ownerId === userId) ||
+			config.ownerIds.includes(userId) ||
 			adminService.isWhitelistedAdmin(userId);
 
 		return { userId, isOperator };

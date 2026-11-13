@@ -12,7 +12,8 @@ export type Config = {
 	redirectUri: string | null;
 	guildId: string | null;
 	guildIds: string[];
-	ownerId: string | null;
+	/** The ids of the bot owners - all of them get the same full access. */
+	ownerIds: string[];
 	adminRoleId: string | null;
 	encryptionKey: Buffer;
 	databasePath: string;
@@ -104,6 +105,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		.map((id) => id.trim())
 		.filter(Boolean);
 
+	// Several owners may be given at once - all of them get the same full
+	// access. Comma separated, just like GUILD_ID.
+	const ownerIds = (env.OWNER_ID ?? '')
+		.split(',')
+		.map((id) => id.trim())
+		.filter(Boolean);
+
 	return {
 		botToken: botToken as string,
 		clientId: clientId as string,
@@ -111,7 +119,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		redirectUri: env.DISCORD_REDIRECT_URI?.trim() || null,
 		guildId: guildIds[0] ?? null,
 		guildIds,
-		ownerId: env.OWNER_ID?.trim() || null,
+		ownerIds,
 		adminRoleId: env.ADMIN_ROLE_ID?.trim() || null,
 		encryptionKey: deriveKey(env),
 		databasePath: env.DATABASE_PATH?.trim() || 'data/quest-bot.sqlite',
