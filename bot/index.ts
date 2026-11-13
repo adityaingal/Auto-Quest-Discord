@@ -187,6 +187,17 @@ async function main(): Promise<void> {
 	// running.
 	const server = startHttpServer(config.port, services);
 
+	if (config.redirectUri) {
+		Logger.info(`OAuth2 redirect URI: ${config.redirectUri}`);
+		Logger.info(
+			'  -> it must be registered character for character under OAuth2 -> Redirects',
+		);
+	} else {
+		Logger.warn(
+			'DISCORD_REDIRECT_URI is not set - /account link is disabled.',
+		);
+	}
+
 	await client.login(config.botToken);
 
 	// Additional bot tokens that were registered with /token add.

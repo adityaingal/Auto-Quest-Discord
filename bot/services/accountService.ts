@@ -41,8 +41,18 @@ export class AccountService {
 			);
 		}
 
-		const state = this.oauth2.generateState();
-		this.repositories.storeOauthState(state, discordUserId);
+		// The state is signed with the encryption key, so any instance of the
+		// bot can verify it - no shared database required.
+		const state = this.vault.sign({
+			userId: discordUserId,
+			issuedAt: Date.now(),
+		});
+
+		try {
+			this.repositories.storeOauthState(state, discordUserId);
+		} catch {
+			// the audit row is optional
+		}
 
 		return this.oauth2.buildAuthorizationUrl(state);
 	}
@@ -51,20 +61,42 @@ export class AccountService {
 		state: string,
 		code: string,
 	): Promise<{ discordUserId: string; username: string }> {
-		// The state is only consumed after a successful exchange, so a failed
-		// attempt (expired or already used code) can be retried with a new
-		// authorisation code.
-		const discordUserId = this.repositories.peekOauthState(state);
+		const signed = this.vault.verify<{
+			userId: string;
+			issuedAt: number;
+		}>(state);
+
+		let discordUserId = signed?.userId;
+
+		// States that were issued before the signing was introduced are looked
+		// up in the database.
+		if (!discordUserId) {
+			discordUserId = this.repositories.peekOauthState(state);
+		}
+
 		if (!discordUserId) {
 			throw new ValidationError(
 				'This authorization link is invalid or expired. Run `/account link` again.',
 			);
 		}
 
+		if (
+			signed?.issuedAt &&
+			Date.now() - signed.issuedAt > 15 * 60_000
+		) {
+			throw new ValidationError(
+				'This authorization link is older than 15 minutes. Run `/account link` again.',
+			);
+		}
+
 		const token = await this.oauth2.exchangeCode(code);
 		const identity = await this.fetchIdentity(token.access_token);
 
-		this.repositories.consumeOauthState(state);
+		try {
+			this.repositories.consumeOauthState(state);
+		} catch {
+			// the audit row is optional
+		}
 
 		this.repositories.linkAccount({
 			discord_user_id: discordUserId,

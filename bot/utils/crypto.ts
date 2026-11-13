@@ -1,4 +1,10 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import {
+	createCipheriv,
+	createDecipheriv,
+	createHmac,
+	randomBytes,
+	timingSafeEqual,
+} from 'node:crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
@@ -42,5 +48,44 @@ export class TokenVault {
 			decipher.update(Buffer.from(dataPart, 'base64url')),
 			decipher.final(),
 		]).toString('utf8');
+	}
+
+	/**
+	 * Signs a short lived payload (used for the OAuth2 state). The signature
+	 * lets a different instance of the bot verify it without a shared
+	 * database - only the encryption key has to be the same.
+	 */
+	sign(payload: Record<string, unknown>): string {
+		const body = Buffer.from(JSON.stringify(payload)).toString(
+			'base64url',
+		);
+		const signature = createHmac('sha256', this.key)
+			.update(body)
+			.digest('base64url');
+
+		return `${body}.${signature}`;
+	}
+
+	verify<T>(state: string): T | null {
+		const [body, signature] = state.split('.');
+		if (!body || !signature) return null;
+
+		const expected = createHmac('sha256', this.key)
+			.update(body)
+			.digest('base64url');
+
+		const given = Buffer.from(signature);
+		const wanted = Buffer.from(expected);
+
+		if (given.length !== wanted.length) return null;
+		if (!timingSafeEqual(given, wanted)) return null;
+
+		try {
+			return JSON.parse(
+				Buffer.from(body, 'base64url').toString('utf8'),
+			) as T;
+		} catch {
+			return null;
+		}
 	}
 }
