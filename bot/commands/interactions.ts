@@ -14,7 +14,12 @@ import { toUserMessage } from '../utils/errors';
 import { buildQuestPages, buildQuestSelect, buildPagingRow } from '../ui/components';
 import { errorEmbed, infoEmbed, questDetailEmbed, questListEmbed, questQueueEmbed, progressEmbed } from '../ui/embeds';
 import { isAdmin } from './admin';
-import { renderQuestPanel, decodeSegment } from '../ui/panel';
+import {
+	renderQuestPanel,
+	decodeSegment,
+	decodeFilter,
+	filterPayloadQuests,
+} from '../ui/panel';
 import type { QueueEntry } from '../ui/embeds';
 import type { QueueJob, AutoProgress } from '../services/autoService';
 import type { QuestPayload } from '../integrations/userSession';
@@ -48,6 +53,7 @@ export class InteractionRouter {
 		this.register('quest:panel_help', this.handlePanelHelp);
 		this.register('quest:access', this.handleQuestAccess);
 		this.register('quest:panel_complete_all', this.handleCompleteAll);
+		this.register('quest:panel_filter', this.handlePanelFilter);
 		this.register('admin:maintenance_confirm', this.handleMaintenance);
 		this.register('admin:maintenance_cancel', this.handleMaintenanceCancel);
 	}
@@ -332,6 +338,32 @@ export class InteractionRouter {
 		});
 	}
 
+	private async handlePanelFilter(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		const parts = interaction.customId.split(':');
+		// quest:panel_filter:<filter>:<account>
+		const rawFilter = parts[2];
+		const filter =
+			rawFilter === 'videos' || rawFilter === 'games' ? rawFilter : 'all';
+		const account = decodeSegment(parts[3]);
+
+		const scope = services.scopeFor(interaction.user.id);
+		const payload = await renderQuestPanel(
+			services,
+			scope,
+			null,
+			account,
+			0,
+			filter,
+		);
+
+		await interaction.update({ ...payload });
+	}
+
 	private async handlePanelSelect(
 		interaction: Interaction,
 		services: Services,
@@ -581,8 +613,8 @@ export class InteractionRouter {
 	): Promise<void> {
 		if (!interaction.isMessageComponent()) return;
 
-		const accountSegment = interaction.customId.split(':')[2];
-		const account = decodeSegment(accountSegment);
+		const account = decodeSegment(interaction.customId.split(':')[2]);
+		const filter = decodeFilter(interaction.customId.split(':')[3]);
 		const scope = services.scopeFor(interaction.user.id);
 
 		if (!services.autoService.enabled(scope)) {
@@ -619,17 +651,35 @@ export class InteractionRouter {
 			return;
 		}
 
+		const filteredPlan = plan.filter((job) =>
+			filterPayloadQuests([job.quest], filter).length > 0,
+		);
+
 		// The live view.
-		const entries: QueueEntry[] = plan.map((job) => ({
-			name: job.quest.config.messages.quest_name,
-			account: job.account,
-			taskType: job.quest.config.task_config_v2?.tasks
-				? Object.keys(job.quest.config.task_config_v2.tasks)[0] ?? null
-				: null,
-			value: 0,
-			target: 0,
-			state: 'queued',
-		}));
+		const entries: QueueEntry[] = filteredPlan.map((job) => ({
+				name: job.quest.config.messages.quest_name,
+				account: job.account,
+				taskType: job.quest.config.task_config_v2?.tasks
+					? Object.keys(job.quest.config.task_config_v2.tasks)[0] ?? null
+					: null,
+				value: 0,
+				target: 0,
+				state: 'queued',
+				quest: job.quest,
+			}));
+
+		if (entries.length === 0) {
+			await interaction.reply({
+				embeds: [
+					infoEmbed(
+						'NOTHING TO DO',
+						'No video/game quests are available for your accounts right now. Try `/quest panel category:all`.',
+					),
+				],
+				flags: MessageFlags.Ephemeral,
+			});
+			return;
+		}
 
 		const publish = async () => {
 			const done = entries.filter(
@@ -707,7 +757,7 @@ export class InteractionRouter {
 
 					await live(quest, { ...progress, state }, index);
 				},
-				{ account, plan },
+				{ account, plan: filteredPlan },
 			);
 		} catch (error) {
 			Logger.error(

@@ -186,6 +186,7 @@ export function questDetailEmbed(quest: QuestDetail): EmbedBuilder {
 export function questPanelEmbed(
 	quest: QuestView,
 	accountLabel?: string | null,
+	filter?: 'all' | 'videos' | 'games',
 ): EmbedBuilder {
 	const reward = quest.rewards[0] ?? null;
 	const rewardText = reward

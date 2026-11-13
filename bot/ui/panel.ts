@@ -24,6 +24,7 @@ export const PANEL_IDS = {
 	progress: 'quest:panel_progress',
 	help: 'quest:panel_help',
 	completeAll: 'quest:panel_complete_all',
+	filter: 'quest:panel_filter',
 } as const;
 
 export type PanelPayload = {
@@ -32,6 +33,101 @@ export type PanelPayload = {
 		StringSelectMenuBuilder | ButtonBuilder
 	>[];
 };
+
+/** The task-type categories the user can filter the quests by. */
+export type QuestFilter = 'all' | 'videos' | 'games';
+
+const FILTER_LABELS: Record<QuestFilter, string> = {
+	all: 'All',
+	videos: 'Videos',
+	games: 'Games',
+};
+
+const VIDEO_TASKS = new Set([
+	'WATCH_VIDEO',
+	'WATCH_VIDEO_ON_MOBILE',
+]);
+
+const GAME_TASKS = new Set([
+	'PLAY_ON_DESKTOP',
+	'PLAY_ON_XBOX',
+	'PLAY_ON_PLAYSTATION',
+	'PLAY_ACTIVITY',
+	'STREAM_ON_DESKTOP',
+	'ACHIEVEMENT_IN_GAME',
+	'ACHIEVEMENT_IN_ACTIVITY',
+]);
+
+/** Filters the quests by task category. */
+export function filterQuests<T extends { taskTypes: string[] }>(
+	quests: T[],
+	filter: QuestFilter,
+): T[] {
+	if (filter === 'all') return quests;
+
+	const wanted = filter === 'videos' ? VIDEO_TASKS : GAME_TASKS;
+
+	return quests.filter((quest) =>
+		quest.taskTypes.some((type) => wanted.has(type)),
+	);
+}
+
+/** Filters the live quests (payload shape) by the same category. */
+export function filterPayloadQuests<
+	T extends {
+		config?: {
+			task_config?: { tasks?: Record<string, { target: number }> };
+			task_config_v2?: { tasks?: Record<string, { target: number }> };
+		};
+	},
+>(payloads: T[], filter: QuestFilter): T[] {
+	if (filter === 'all') return payloads;
+
+	const wanted = filter === 'videos' ? VIDEO_TASKS : GAME_TASKS;
+
+	return payloads.filter((payload) => {
+		const tasks =
+			Object.keys(payload.config?.task_config_v2?.tasks ?? {}).length
+				? payload.config?.task_config_v2?.tasks ?? {}
+				: payload.config?.task_config?.tasks ?? {};
+
+		const types = Object.keys(tasks);
+
+		return types.some((type) => wanted.has(type));
+	});
+}
+
+/** The filter buttons row labelled with the filter that is in effect. */
+export function filterButtons(
+	current: QuestFilter,
+	account: string,
+): ActionRowBuilder<ButtonBuilder> {
+	return new ActionRowBuilder<ButtonBuilder>().addComponents(
+		new ButtonBuilder()
+			.setCustomId(`${PANEL_IDS.filter}:all:${account}`)
+			.setLabel('All')
+			.setStyle(
+				current === 'all' ? ButtonStyle.Primary : ButtonStyle.Secondary,
+			),
+		new ButtonBuilder()
+			.setCustomId(`${PANEL_IDS.filter}:videos:${account}`)
+			.setLabel('Videos')
+			.setStyle(
+				current === 'videos' ? ButtonStyle.Primary : ButtonStyle.Secondary,
+			),
+		new ButtonBuilder()
+			.setCustomId(`${PANEL_IDS.filter}:games:${account}`)
+			.setLabel('Games')
+			.setStyle(
+				current === 'games' ? ButtonStyle.Primary : ButtonStyle.Secondary,
+			),
+	);
+}
+
+export function describeFilter(filter: QuestFilter): string {
+	return FILTER_LABELS[filter] ?? FILTER_LABELS.all;
+}
+
 
 const STATUS_TEXT: Record<QuestEligibility, string> = {
 	[QuestEligibility.AVAILABLE]: 'available',
@@ -57,6 +153,14 @@ export function decodeSegment(segment: string | undefined): string | null {
 	}
 }
 
+/** Decodes the filter the user picked in one of the tab buttons. */
+export function decodeFilter(
+	segment: string | undefined,
+): QuestFilter {
+	if (segment === 'videos' || segment === 'games') return segment;
+	return 'all';
+}
+
 function describeQuest(quest: QuestView): string {
 	const reward = quest.rewards[0];
 	const head = reward
@@ -69,26 +173,29 @@ function describeQuest(quest: QuestView): string {
 }
 
 /**
- * The dropdown panel with every quest the scope can see. The page is carried
- * in the custom id, so a page turn re-renders against the live list.
+ * The dropdown panel with every quest the scope can see. The page and the
+ * filter are both carried in the custom id, so a page turn or a filter click
+ * re-renders against the live list with the same selection.
  */
 export function questSelectMenu(
 	quests: QuestView[],
 	selectedId: string,
 	page: number,
 	account = '-',
+	filter: QuestFilter = 'all',
 ): ActionRowBuilder<StringSelectMenuBuilder> {
-	const totalPages = Math.max(1, Math.ceil(quests.length / PANEL_PAGE));
+	const filtered = filterQuests(quests, filter);
+	const totalPages = Math.max(1, Math.ceil(filtered.length / PANEL_PAGE));
 	const safePage = Math.min(Math.max(page, 0), totalPages - 1);
-	const slice = quests.slice(
+	const slice = filtered.slice(
 		safePage * PANEL_PAGE,
 		safePage * PANEL_PAGE + PANEL_PAGE,
 	);
 
 	const menu = new StringSelectMenuBuilder()
-		.setCustomId(`${PANEL_IDS.select}:${safePage}:${account}`)
+		.setCustomId(`${PANEL_IDS.select}:${safePage}:${account}:${filter}`)
 		.setPlaceholder(
-			quests.length > PANEL_PAGE
+			filtered.length > PANEL_PAGE
 				? `Select a quest (${safePage + 1}/${totalPages})`
 				: 'Select a quest',
 		)
@@ -114,15 +221,16 @@ function navButtons(
 	totalPages: number,
 	selectedId: string,
 	account: string,
+	filter: QuestFilter = 'all',
 ): ActionRowBuilder<ButtonBuilder> {
 	return new ActionRowBuilder<ButtonBuilder>().addComponents(
 		new ButtonBuilder()
-			.setCustomId(`${PANEL_IDS.prev}:${page}:${account}:${selectedId}`)
+			.setCustomId(`${PANEL_IDS.prev}:${page}:${account}:${filter}:${selectedId}`)
 			.setLabel('Previous page')
 			.setStyle(ButtonStyle.Secondary)
 			.setDisabled(page <= 0),
 		new ButtonBuilder()
-			.setCustomId(`${PANEL_IDS.next}:${page}:${account}:${selectedId}`)
+			.setCustomId(`${PANEL_IDS.next}:${page}:${account}:${filter}:${selectedId}`)
 			.setLabel('Next page')
 			.setStyle(ButtonStyle.Secondary)
 			.setDisabled(page >= totalPages - 1),
@@ -173,14 +281,15 @@ export function actionButtons(
 /**
  * The button that runs every quest the account of the user offers. Only the
  * owner can operate the automation, and it is only available when the user
- * has an account configured.
+ * has an account configured. The filter decides which quests are run.
  */
 export function completeAllButton(
 	account = '-',
+	filter: QuestFilter = 'all',
 ): ActionRowBuilder<ButtonBuilder> {
 	return new ActionRowBuilder<ButtonBuilder>().addComponents(
 		new ButtonBuilder()
-			.setCustomId(`${PANEL_IDS.completeAll}:${account}`)
+			.setCustomId(`${PANEL_IDS.completeAll}:${account}:${filter}`)
 			.setLabel('Complete All Quests')
 			.setStyle(ButtonStyle.Success)
 			.setEmoji('⚡'),
@@ -188,26 +297,30 @@ export function completeAllButton(
 }
 
 /**
- * Assembles the complete panel: the embed, the select menu and the buttons.
+ * Assembles the complete panel: the embed, the filter buttons, the select
+ * menu and the action buttons.
  */
 export function buildQuestPanel(
 	quest: QuestDetail,
 	quests: QuestView[],
 	page: number,
 	accountLabel: string | null,
+	filter: QuestFilter = 'all',
 ): PanelPayload {
-	const totalPages = Math.max(1, Math.ceil(quests.length / PANEL_PAGE));
+	const filtered = filterQuests(quests, filter);
+	const totalPages = Math.max(1, Math.ceil(filtered.length / PANEL_PAGE));
 	const safePage = Math.min(Math.max(page, 0), totalPages - 1);
 	const account = accountSegment(accountLabel);
 
 	return {
-		embeds: [questPanelEmbed(quest, accountLabel)],
+		embeds: [questPanelEmbed(quest, accountLabel, filter)],
 		components: [
 			actionButtons(quest, account),
-			completeAllButton(account),
-			questSelectMenu(quests, quest.id, safePage, account),
+			filterButtons(filter, account),
+			completeAllButton(account, filter),
+			questSelectMenu(filtered, quest.id, safePage, account, filter),
 			...(totalPages > 1
-				? [navButtons(safePage, totalPages, quest.id, account)]
+				? [navButtons(safePage, totalPages, quest.id, account, filter)]
 				: []),
 		],
 	};
@@ -223,8 +336,10 @@ export async function renderQuestPanel(
 	questId: string | null,
 	account: string | null,
 	page = 0,
+	filter: QuestFilter = 'all',
 ): Promise<PanelPayload> {
 	const list = await services.questService.list(scope, account);
+	const filtered = filterQuests(list.quests, filter);
 
 	if (list.quests.length === 0) {
 		return {
@@ -238,7 +353,24 @@ export async function renderQuestPanel(
 		};
 	}
 
-	const wanted = questId ?? list.quests[0].id;
+	const wanted =
+		questId ??
+		filtered[0]?.id ??
+		list.quests[0]?.id ??
+		null;
+
+	if (!wanted) {
+		return {
+			embeds: [
+				infoEmbed(
+					`NO ${filter === 'all' ? 'QUESTS' : filter.toUpperCase()}`,
+					`There is no ${filter === 'all' ? '' : `${filter.slice(0, -1)} `}quest right now. Try another filter.`,
+				),
+			],
+			components: [filterButtons(filter, accountSegment(account))],
+		};
+	}
+
 	const detail = await services.questService.get(wanted, scope, account);
 
 	return buildQuestPanel(
@@ -246,6 +378,7 @@ export async function renderQuestPanel(
 		list.quests,
 		page,
 		account ?? 'your accounts',
+		filter,
 	);
 }
 

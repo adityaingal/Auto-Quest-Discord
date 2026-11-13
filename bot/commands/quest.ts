@@ -305,15 +305,35 @@ export const questCommand = group(
 		},
 		{
 			name: 'panel',
-			description: 'Open the main quest interface - banner, dropdown and actions.',
-			build: accountOption,
+			description:
+				'Open the main quest interface - banner, dropdown and actions.',
+			build: (sub) => {
+				accountOption(sub);
+				sub.addStringOption((option) =>
+					option
+						.setName('category')
+						.setDescription('Which quests to show')
+						.setRequired(false)
+						.addChoices(
+							{ name: 'all quests', value: 'all' },
+							{ name: 'videos only', value: 'videos' },
+							{ name: 'games only', value: 'games' },
+						),
+				);
+			},
 			run: async (context: CommandContext) => {
 				const { interaction, services, scope } = context;
 				const account = interaction.options.getString('account');
+				const category = interaction.options.getString('category');
 				const selected = services.autoService.resolveAccount(
 					scope,
 					account,
 				);
+
+				const filter =
+					category === 'videos' || category === 'games'
+						? category
+						: 'all';
 
 				const payload = await renderQuestPanel(
 					services,
@@ -321,6 +341,7 @@ export const questCommand = group(
 					null,
 					selected ?? null,
 					0,
+					filter,
 				);
 
 				await interaction.reply({
@@ -433,10 +454,29 @@ export const questCommand = group(
 		{
 			name: 'select',
 			description: 'Select a quest and open the main interface.',
-			build: questOption,
+			build: (sub) => {
+				questOption(sub);
+				sub.addStringOption((option) =>
+					option
+						.setName('category')
+						.setDescription('Which quests to show')
+						.setRequired(false)
+						.addChoices(
+							{ name: 'all quests', value: 'all' },
+							{ name: 'videos only', value: 'videos' },
+							{ name: 'games only', value: 'games' },
+						),
+				);
+			},
 			run: async (context: CommandContext) => {
 				const { interaction, services, scope } = context;
 				const questId = interaction.options.getString('quest', true);
+				const category = interaction.options.getString('category');
+
+				const filter =
+					category === 'videos' || category === 'games'
+						? category
+						: 'all';
 
 				const payload = await renderQuestPanel(
 					services,
@@ -444,6 +484,7 @@ export const questCommand = group(
 					questId,
 					null,
 					0,
+					filter,
 				);
 
 				await interaction.reply({
