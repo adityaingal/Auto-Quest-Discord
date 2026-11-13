@@ -87,9 +87,33 @@ upgraded in place. `schema_migrations` records what has been applied and
 
 ## Credential handling
 
-* Only OAuth2 tokens (scope `identify`) are stored, encrypted with AES-256-GCM.
-* The encryption key comes from `ENCRYPTION_KEY` (fallback: the client secret).
-* Raw user tokens are never requested, stored or logged.
+* OAuth2 tokens (scope `identify`) are stored encrypted with AES-256-GCM.
+* The encryption key comes from `ENCRYPTION_KEY`. There is **no fallback key**:
+  the bot refuses to start when it is missing, because a published default
+  would let everybody decrypt every stored token.
 * Authorization headers are never written to the log.
 * OAuth2 state values are single use and bound to the Discord user that started
   the flow, so a redirect link cannot be used by somebody else.
+
+## Correction: user tokens are stored after all
+
+The original 2.0 report claimed that "raw user tokens are never requested,
+stored or logged". That was not true - the code kept the user-session client
+(`bot/integrations/userSession.ts`) and `/token add ... user` stored the token
+encrypted. The report was wrong, not the code.
+
+2.1 makes this explicit and per user:
+
+* `/room add` asks a **user** for their own Discord user token and stores it
+  encrypted, scoped to that user's room.
+* The token is never shown in full, never logged and never sent to a webhook.
+* The token only ever drives the account of the user who added it. The
+  accounts of one user are never reachable from another one - the scope in
+  `bot/services/scope.ts` enforces this in the database layer.
+* Using a user token violates Discord's terms of service. The readme says so
+  in the same place as the feature.
+
+The desktop client impersonation (feature 17) was **not** removed - the user
+session client still sends the desktop fingerprint, because the quest
+endpoints only answer it that way. That is a remaining deviation from the
+original specification and it is listed in the readme under "Limits".

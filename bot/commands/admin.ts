@@ -8,9 +8,21 @@ import { CommandContext, CommandDefinition, group } from './types';
 import { infoEmbed, successEmbed, errorEmbed } from '../ui/embeds';
 import { PermissionError } from '../utils/errors';
 import { buildMaintenanceRow } from '../ui/components';
+import { Services } from '../services';
 
-export function isAdmin(context: CommandContext): boolean {
-	const { services, userId, interaction } = context;
+/**
+ * What the admin check needs. The member is passed separately, so the check
+ * works for a chat command, for a button and for the autocomplete.
+ */
+export type AdminCheck = {
+	services: Services;
+	userId: string;
+	/** The guild member that ran the interaction, if there is one. */
+	member?: unknown;
+};
+
+export function isAdmin(context: AdminCheck): boolean {
+	const { services, userId, member } = context;
 
 	if (services.config.ownerId && userId === services.config.ownerId) {
 		return true;
@@ -23,23 +35,37 @@ export function isAdmin(context: CommandContext): boolean {
 
 	const adminRoleId = services.config.adminRoleId;
 	if (!adminRoleId) return false;
+	if (!member || typeof member !== 'object') return false;
 
-	const member = interaction.member;
-	if (!member || !('roles' in member)) return false;
+	// The member is either a GuildMember (a cache collection) or the raw API
+	// shape (an array of role ids).
+	if (!('roles' in member)) return false;
 
-	return Array.isArray(member.roles)
-		? member.roles.includes(adminRoleId)
-		: member.roles.cache.has(adminRoleId);
+	const roles = (member as { roles: unknown }).roles;
+
+	if (Array.isArray(roles)) {
+		return roles.includes(adminRoleId);
+	}
+
+	if (roles && typeof roles === 'object' && 'cache' in roles) {
+		const cache = (roles as { cache: { has(id: string): boolean } }).cache;
+		return cache.has(adminRoleId);
+	}
+
+	return false;
 }
 
 export function assertAdmin(context: CommandContext): void {
-	if (!isAdmin(context)) {
+	if (!isAdmin({
+		services: context.services,
+		userId: context.userId,
+		member: context.interaction.member,
+	})) {
 		throw new PermissionError(
 			'Only the bot owner or the configured admin role can use this command.',
 		);
 	}
 }
-
 function adminOption(sub: SlashCommandSubcommandBuilder): void {
 	sub.addStringOption((option) =>
 		option
@@ -113,18 +139,22 @@ export const adminCommand: CommandDefinition = group(
 									name: 'Notification channel',
 									value: channelId ?? 'not set',
 								},
-							{
-								name: 'User sessions',
-								value:
-									services.autoService.accounts.join(', ') ||
-									'none - /quest auto stays disabled',
-							},
-							{
-								name: 'Selected account',
-								value:
-									services.autoService.defaultAccount ??
-									'none - every account is used at the same time',
-							},
+						{
+							name: 'User sessions',
+							value:
+								services.autoService
+									.accounts(services.scopeFor(userId))
+									.join(', ') ||
+								'none - /quest auto stays disabled',
+						},
+						{
+							name: 'Selected account',
+							value:
+								services.autoService.defaultAccount(
+									services.scopeFor(userId),
+								) ??
+								'none - every account is used at the same time',
+						},
 							],
 						),
 					],
@@ -230,7 +260,9 @@ export const adminCommand: CommandDefinition = group(
 			run: async (context: CommandContext) => {
 				assertAdmin(context);
 				const result =
-					await context.services.questService.refresh(context.userId);
+					await context.services.questService.refresh(
+						context.services.scopeFor(context.userId),
+					);
 
 				context.services.adminService.audit(
 					context.userId,
@@ -345,6 +377,49 @@ export const adminCommand: CommandDefinition = group(
 
 				await context.interaction.reply({
 					embeds: [successEmbed(`\`${key}\` is now \`${value}\`.`)],
+					flags: MessageFlags.Ephemeral,
+				});
+			},
+		},
+		{
+			name: 'purge',
+			description: 'Delete every piece of data of a user.',
+			build: (sub) => {
+				sub.addStringOption((option) =>
+					option
+						.setName('user')
+						.setDescription('The Discord user id')
+						.setRequired(true),
+				);
+			},
+			run: async (context: CommandContext) => {
+				assertAdmin(context);
+				const userId = context.interaction.options
+					.getString('user', true)
+					.trim();
+
+				if (!/^\d{15,25}$/.test(userId)) {
+					await context.interaction.reply({
+						content:
+							'That does not look like a Discord id (it should be 17-20 digits).',
+						flags: MessageFlags.Ephemeral,
+					});
+					return;
+				}
+
+				context.services.repositories.purgeUser(userId);
+				context.services.adminService.audit(
+					context.userId,
+					'purge_user',
+					userId,
+				);
+
+				await context.interaction.reply({
+					embeds: [
+						successEmbed(
+							`Every piece of data of \`${userId}\` was deleted - the link, the rooms, the progress, the history and the rewards.`,
+						),
+					],
 					flags: MessageFlags.Ephemeral,
 				});
 			},

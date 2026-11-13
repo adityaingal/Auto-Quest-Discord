@@ -8,6 +8,7 @@ import { taskCommand } from './task';
 import { rewardCommand } from './reward';
 import { adminCommand } from './admin';
 import { tokenCommand } from './token';
+import { roomCommand } from './room';
 
 export const commands: CommandDefinition[] = [
 	questCommand,
@@ -16,6 +17,7 @@ export const commands: CommandDefinition[] = [
 	rewardCommand,
 	adminCommand,
 	tokenCommand,
+	roomCommand,
 ];
 
 export const commandNames = commands.map((command) => command.data.name);
@@ -24,6 +26,10 @@ export const commandNames = commands.map((command) => command.data.name);
  * Registers the slash commands. Guild scoped registration is instant, global
  * registration can take up to an hour to propagate. Several guilds can be
  * given (comma separated in GUILD_ID).
+ *
+ * The commands are always registered as a whole set - a command that is
+ * removed from the list is also removed from Discord, so a stale command
+ * never stays behind and answers with "unknown command".
  */
 export async function registerCommands(
 	client: Client,

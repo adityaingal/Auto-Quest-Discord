@@ -14,8 +14,20 @@ import { createServices } from './services';
 import { commands, registerCommands } from './commands/registry';
 import { InteractionRouter } from './commands/interactions';
 import { isAdmin } from './commands/admin';
+import { roomAutocomplete } from './commands/room';
 import { toUserMessage, AppError } from './utils/errors';
 import { startHttpServer } from './httpServer';
+
+/**
+ * Whether the user may reach the operator level data. The check is done
+ * without the interaction, so it also works for the autocomplete.
+ */
+function isOperator(
+	userId: string,
+	services: ReturnType<typeof createServices>,
+): boolean {
+	return services.scopeFor(userId).isOperator;
+}
 
 async function main(): Promise<void> {
 	const config = loadConfig();
@@ -24,11 +36,7 @@ async function main(): Promise<void> {
 	Logger.info('Starting Discord Quest Completer bot...');
 
 	const client = new Client({
-		intents: [
-			GatewayIntentBits.Guilds,
-			GatewayIntentBits.GuildMessages,
-			GatewayIntentBits.MessageContent,
-		],
+		intents: [GatewayIntentBits.Guilds],
 	});
 
 	const services = createServices(config, client);
@@ -44,6 +52,36 @@ async function main(): Promise<void> {
 	const attachInteractions = (target: Client) => {
 		target.on('interactionCreate', async (interaction: Interaction) => {
 			try {
+				// The whitelist is checked for every kind of interaction, so
+				// a blocked user cannot read anything through the autocomplete
+				// or through a button.
+				const access = services.adminService.checkAccess({
+					userId: interaction.user.id,
+					guildId: interaction.guildId,
+					isAdmin: isAdmin({
+						services,
+						userId: interaction.user.id,
+						member: interaction.member,
+					}),
+				});
+
+				if (!access.allowed) {
+					if (interaction.isAutocomplete()) {
+						await interaction.respond([]);
+						return;
+					}
+
+					if (interaction.isRepliable()) {
+						await interaction.reply({
+							content: `⛔ ${access.reason}`,
+							flags: MessageFlags.Ephemeral,
+						});
+						return;
+					}
+
+					return;
+				}
+
 				if (interaction.isAutocomplete()) {
 					await handleAutocomplete(interaction, services);
 					return;
@@ -55,26 +93,6 @@ async function main(): Promise<void> {
 				}
 
 				if (!interaction.isChatInputCommand()) return;
-
-				// Whitelist: only the listed servers and users may use the bot.
-				const access = services.adminService.checkAccess({
-					userId: interaction.user.id,
-					guildId: interaction.guildId,
-					isAdmin: isAdmin({
-						interaction,
-						services,
-						userId: interaction.user.id,
-						guildId: interaction.guildId,
-					}),
-				});
-
-				if (!access.allowed) {
-					await interaction.reply({
-						content: `⛔ ${access.reason}`,
-						flags: MessageFlags.Ephemeral,
-					});
-					return;
-				}
 
 				const command = commands.find(
 					(entry) => entry.data.name === interaction.commandName,
@@ -105,6 +123,7 @@ async function main(): Promise<void> {
 					services,
 					userId: interaction.user.id,
 					guildId: interaction.guildId,
+					scope: services.scopeFor(interaction.user.id),
 				});
 			} catch (error) {
 				// Expected errors (validation, permissions, unavailable
@@ -201,13 +220,14 @@ async function main(): Promise<void> {
 	Logger.info(`OAuth2 client id: ${config.clientId}`);
 
 	// The user sessions that can read quests and run the automation.
-	const sessionLabels = services.autoService.accounts;
+	const operatorScope = services.scopeFor(config.ownerId ?? 'operator');
+	const sessionLabels = services.autoService.accounts(operatorScope);
 	if (sessionLabels.length > 0) {
 		Logger.info(
 			`User sessions available: ${sessionLabels.join(', ')}`,
 		);
 
-		const selected = services.autoService.defaultAccount;
+		const selected = services.autoService.defaultAccount(operatorScope);
 		Logger.info(
 			selected
 				? `Selected account: ${selected} ("/quest switch account:all" uses every account again)`
@@ -216,53 +236,16 @@ async function main(): Promise<void> {
 	} else {
 		Logger.warn(
 			'No user session configured - /quest auto and /quest all stay disabled. ' +
-				'Add one with "/token add <label> <token> user" or set USER_TOKEN in the environment.',
+				'Add one with "/room add" (per user) or "/token add <label> <token> user" (operator).',
 		);
 	}
 
 	await client.login(config.botToken);
 
-	// Additional bot tokens that were registered with /token add.
-	for (const entry of services.tokenService.resolveUsable()) {
-		try {
-			const extra = new Client({
-				intents: [
-					GatewayIntentBits.Guilds,
-					GatewayIntentBits.GuildMessages,
-					GatewayIntentBits.MessageContent,
-				],
-			});
-
-			attachInteractions(extra);
-			clients.push(extra);
-
-			extra.once(
-				Events.ClientReady ?? ('ready' as never),
-				async () => {
-					try {
-						await registerCommands(extra, config);
-						Logger.info(
-							`Additional bot "${entry.label}" ready (${extra.user?.tag ?? 'unknown'})`,
-						);
-					} catch (error) {
-						Logger.error(
-							`Could not register commands for "${entry.label}": ${
-								(error as Error).message
-							}`,
-						);
-					}
-				},
-			);
-
-			await extra.login(entry.token);
-		} catch (error) {
-			Logger.error(
-				`Could not start the additional bot "${entry.label}": ${
-					(error as Error).message
-				}`,
-			);
-		}
-	}
+	// Only one bot instance answers the commands. An additional bot token
+	// would register the same command names a second time, so every command
+	// would show up twice in the Discord client and both bots would answer
+	// the same interaction.
 
 	services.notificationService.start(
 		config.notificationIntervalMinutes,
@@ -323,15 +306,14 @@ async function handleAutocomplete(
 	const started = Date.now();
 	const focused = interaction.options.getFocused(true);
 	const value = String(focused.value ?? '').trim();
+	const scope = services.scopeFor(interaction.user.id);
 
 	try {
 		if (focused.name === 'quest') {
 			const now = Date.now();
 
 			if (!autocompleteCache || now - autocompleteCache.fetchedAt > AUTOCOMPLETE_TTL) {
-				const { quests } = await services.questService.list(
-					interaction.user.id,
-				);
+				const { quests } = await services.questService.list(scope);
 
 				autocompleteCache = {
 					quests: quests.map((quest) => ({
@@ -391,7 +373,9 @@ async function handleAutocomplete(
 		}
 
 		if (focused.name === 'account') {
-			const accounts = services.autoService.accounts;
+			// Only the accounts of the caller are offered - the accounts of
+			// the operator are never shown to anybody else.
+			const accounts = services.autoService.accounts(scope);
 			const choices: { name: string; value: string }[] = [];
 
 			// "all" is always offered - it switches back to every account.
@@ -422,7 +406,29 @@ async function handleAutocomplete(
 			return;
 		}
 
+		if (focused.name === 'room') {
+			const rooms = roomAutocomplete(
+				services.roomService,
+				interaction.user.id,
+				value,
+			);
+
+			await interaction.respond(
+				rooms.length
+					? rooms
+					: [{ name: value.slice(0, 100), value: value.slice(0, 100) }],
+			);
+			return;
+		}
+
 		if (focused.name === 'file') {
+			// The backup files are only for admins - nobody else may even
+			// see their names.
+			if (!isOperator(interaction.user.id, services)) {
+				await interaction.respond([]);
+				return;
+			}
+
 			const files = services.adminService.backups().slice(0, 25);
 			await interaction.respond(
 				files.map((file) => ({ name: file, value: file })),

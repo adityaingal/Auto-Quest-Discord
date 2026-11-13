@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AutoService } from '../bot/services/autoService';
+import { AccountScope, OPERATOR_SCOPE } from '../bot/services/scope';
 import type { UserSession } from '../bot/integrations/userSession';
+
+/** The scope the tests work in. */
+const SCOPE: AccountScope = OPERATOR_SCOPE;
 
 function quest(
 	tasks: Record<string, { target: number }>,
@@ -126,7 +130,10 @@ test('a console only quest reports the task it cannot automate', () => {
 
 test('an expired quest is refused before anything is sent', async () => {
 	const service = new AutoService(() => []);
-	const result = await service.run(quest({ WATCH_VIDEO: { target: 40 } }, -1000));
+	const result = await service.run(
+		SCOPE,
+		quest({ WATCH_VIDEO: { target: 40 } }, -1000),
+	);
 
 	assert.equal(result.finished, false);
 	assert.ok(result.message.includes('expired'));
@@ -134,18 +141,21 @@ test('an expired quest is refused before anything is sent', async () => {
 
 test('without a session the automation explains itself', async () => {
 	const service = new AutoService(() => []);
-	const result = await service.run(quest({ WATCH_VIDEO: { target: 40 } }));
+	const result = await service.run(
+		SCOPE,
+		quest({ WATCH_VIDEO: { target: 40 } }),
+	);
 
 	assert.equal(result.finished, false);
-	assert.ok(result.message.includes('/token add'));
+	assert.ok(result.message.includes('/room add'));
 });
 
 test('the enabled flag follows the session list', () => {
-	assert.equal(new AutoService(() => []).enabled, false);
+	assert.equal(new AutoService(() => []).enabled(SCOPE), false);
 	assert.equal(
 		new AutoService(() => [
 			{ label: 'main', session: null as never },
-		]).enabled,
+		]).enabled(SCOPE),
 		true,
 	);
 });
@@ -161,7 +171,7 @@ test('the plan holds the quests of every account', async () => {
 		{ label: 'second', session: second.asSession() },
 	]);
 
-	const plan = await service.planQueue();
+	const plan = await service.planQueue(SCOPE);
 
 	assert.equal(plan.length, 2);
 	assert.deepEqual(
@@ -181,7 +191,7 @@ test('the quests of all accounts start at the same time', async () => {
 		{ label: 'second', session: second.asSession() },
 	]);
 
-	const summary = await service.runAll();
+	const summary = await service.runAll(SCOPE);
 
 	assert.equal(summary.completed, 2);
 	assert.equal(summary.failed, 0);
@@ -216,7 +226,9 @@ test('the queue only works on the selected account', async () => {
 		{ label: 'second', session: second.asSession() },
 	]);
 
-	const summary = await service.runAll(undefined, { account: 'second' });
+	const summary = await service.runAll(SCOPE, undefined, {
+		account: 'second',
+	});
 
 	assert.equal(summary.completed, 1);
 	assert.deepEqual(summary.accounts, ['second']);
@@ -232,6 +244,7 @@ test('an unknown account is never silently replaced by another one', async () =>
 	]);
 
 	const result = await service.run(
+		SCOPE,
 		quest({ WATCH_VIDEO: { target: 40 } }),
 		'nope',
 	);
@@ -239,7 +252,7 @@ test('an unknown account is never silently replaced by another one', async () =>
 	assert.equal(result.finished, false);
 	assert.ok(result.message.includes('nope'));
 	assert.equal(first.calls.length, 0);
-	assert.throws(() => service.resolveAccount('nope'));
+	assert.throws(() => service.resolveAccount(SCOPE, 'nope'));
 });
 
 test('the selected account can be switched and is remembered', () => {
@@ -255,23 +268,47 @@ test('the selected account can be switched and is remembered', () => {
 		],
 		{
 			readDefaultAccount: () => stored,
-			writeDefaultAccount: (label) => {
+			writeDefaultAccount: (_scope, label) => {
 				stored = label;
 			},
 		},
 	);
 
-	assert.equal(service.defaultAccount, null);
+	assert.equal(service.defaultAccount(SCOPE), null);
 
-	service.setDefaultAccount('second');
+	service.setDefaultAccount(SCOPE, 'second');
 
 	assert.equal(stored, 'second');
-	assert.equal(service.defaultAccount, 'second');
-	assert.equal(service.resolveAccount(), 'second');
-	assert.equal(service.resolveAccount('first'), 'first');
+	assert.equal(service.defaultAccount(SCOPE), 'second');
+	assert.equal(service.resolveAccount(SCOPE), 'second');
+	assert.equal(service.resolveAccount(SCOPE, 'first'), 'first');
 
 	// "all" clears the selection - every account is used again.
-	service.setDefaultAccount(null);
-	assert.equal(service.defaultAccount, null);
-	assert.equal(service.resolveAccount(), null);
+	service.setDefaultAccount(SCOPE, null);
+	assert.equal(service.defaultAccount(SCOPE), null);
+	assert.equal(service.resolveAccount(SCOPE), null);
+});
+
+test('the accounts of one scope never reach another one', () => {
+	const service = new AutoService((scope) =>
+		scope.userId === 'user-a'
+			? [{ label: 'a:1', session: new FakeSession('a').asSession() }]
+			: [{ label: 'b:1', session: new FakeSession('b').asSession() }],
+	);
+
+	assert.deepEqual(service.accounts({ userId: 'user-a', isOperator: false }), [
+		'a:1',
+	]);
+	assert.deepEqual(service.accounts({ userId: 'user-b', isOperator: false }), [
+		'b:1',
+	]);
+});
+
+test('one user cannot stop the queue of another one', () => {
+	const service = new AutoService(() => []);
+
+	service.requestStop({ userId: 'user-a', isOperator: false });
+
+	assert.equal(service.isStopping({ userId: 'user-a', isOperator: false }), true);
+	assert.equal(service.isStopping({ userId: 'user-b', isOperator: false }), false);
 });

@@ -186,6 +186,44 @@ export const MIGRATIONS: Migration[] = [
 			ALTER TABLE whitelist ADD COLUMN role TEXT NOT NULL DEFAULT 'member';
 		`,
 	},
+	{
+		version: 6,
+		name: 'rooms',
+		sql: `
+			CREATE TABLE IF NOT EXISTS rooms (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				owner_user_id TEXT NOT NULL,
+				name TEXT NOT NULL,
+				description TEXT,
+				webhook_id TEXT,
+				webhook_token TEXT,
+				webhook_reveal INTEGER NOT NULL DEFAULT 0,
+				created_at TEXT NOT NULL DEFAULT (datetime('now')),
+				updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+				expires_at TEXT NOT NULL,
+				UNIQUE (owner_user_id, name)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_rooms_owner
+				ON rooms (owner_user_id);
+
+			CREATE TABLE IF NOT EXISTS room_accounts (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				room_id INTEGER NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+				slot INTEGER NOT NULL,
+				token TEXT NOT NULL,
+				account_id TEXT,
+				account_username TEXT,
+				status TEXT NOT NULL DEFAULT 'active',
+				created_at TEXT NOT NULL DEFAULT (datetime('now')),
+				last_checked_at TEXT,
+				UNIQUE (room_id, slot)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_room_accounts_room
+				ON room_accounts (room_id, slot ASC);
+		`,
+	},
 ];
 
 export class Database {
@@ -252,6 +290,12 @@ export class Database {
 		return {
 			changes: Number(result?.changes ?? 0),
 		};
+	}
+
+	/** Runs a statement and returns the id of the inserted row. */
+	insert(sql: string, ...params: unknown[]): number {
+		const result = this.db.prepare(sql).run(...(params as never[]));
+		return Number(result?.lastInsertRowid ?? 0);
 	}
 
 	get<T>(sql: string, ...params: unknown[]): T | undefined {

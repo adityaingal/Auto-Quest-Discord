@@ -11,7 +11,6 @@ import { questDetailEmbed, questListEmbed, questQueueEmbed } from '../ui/embeds'
 import type { QueueEntry } from '../ui/embeds';
 import { infoEmbed, successEmbed } from '../ui/embeds';
 import { ELIGIBILITY_LABELS } from '../models/enums';
-import { assertAdmin } from './admin';
 import { toUserMessage } from '../utils/errors';
 
 function questOption(sub: SlashCommandSubcommandBuilder): void {
@@ -48,12 +47,13 @@ export const questCommand = group(
 			description: 'List the quests that are currently available.',
 			build: accountOption,
 			run: async (context: CommandContext) => {
-				const { interaction, services, userId } = context;
+				const { interaction, services, scope } = context;
 				const account = services.autoService.resolveAccount(
+					scope,
 					interaction.options.getString('account'),
 				);
 				const result = await services.questService.list(
-					userId,
+					scope,
 					account,
 				);
 				const pages = buildQuestPages(result.quests);
@@ -79,14 +79,15 @@ export const questCommand = group(
 				accountOption(sub);
 			},
 			run: async (context: CommandContext) => {
-				const { interaction, services, userId } = context;
+				const { interaction, services, scope } = context;
 				const questId = interaction.options.getString('quest', true);
 				const account = services.autoService.resolveAccount(
+					scope,
 					interaction.options.getString('account'),
 				);
 				const quest = await services.questService.get(
 					questId,
-					userId,
+					scope,
 					account,
 				);
 
@@ -102,9 +103,9 @@ export const questCommand = group(
 			description: 'Start a quest (enrolment happens in the Discord client).',
 			build: questOption,
 			run: async (context: CommandContext) => {
-				const { interaction, services, userId } = context;
+				const { interaction, services, scope } = context;
 				const questId = interaction.options.getString('quest', true);
-				const quest = await services.questService.get(questId, userId);
+				const quest = await services.questService.get(questId, scope);
 
 				await interaction.reply({
 					embeds: [questDetailEmbed(quest)],
@@ -151,14 +152,15 @@ export const questCommand = group(
 				accountOption(sub);
 			},
 			run: async (context: CommandContext) => {
-				const { interaction, services, userId } = context;
+				const { interaction, services, scope } = context;
 				const questId = interaction.options.getString('quest', true);
 				const account = services.autoService.resolveAccount(
+					scope,
 					interaction.options.getString('account'),
 				);
 				const quest = await services.questService.status(
 					questId,
-					userId,
+					scope,
 					account,
 				);
 
@@ -171,21 +173,23 @@ export const questCommand = group(
 		{
 			name: 'sessions',
 			description:
-				'Show the user sessions (accounts) the bot works with - no token is revealed.',
+				'Show the accounts (sessions) of your rooms - no token is revealed.',
 			run: async (context: CommandContext) => {
-				const { interaction, services } = context;
+				const { interaction, services, scope } = context;
 
-				if (!services.autoService.enabled) {
+				if (!services.autoService.enabled(scope)) {
 					await interaction.reply({
 						content:
-							'No user session is configured. Add one with `/token add <label> <token> user`.',
+							'You have no account yet. Add one with `/room add`, or use `/token add` if you are an admin.',
 						flags: MessageFlags.Ephemeral,
 					});
 					return;
 				}
 
-				const sessions = await services.autoService.describeSessions();
-				const selected = services.autoService.defaultAccount;
+				const sessions = await services.autoService.describeSessions(
+					scope,
+				);
+				const selected = services.autoService.defaultAccount(scope);
 
 				const lines = sessions.map((session) => {
 					const state = session.ok
@@ -234,7 +238,7 @@ export const questCommand = group(
 		{
 			name: 'switch',
 			description:
-				'Choose the account the bot works with (admins only - "all" uses every account).',
+				'Choose the account of your rooms the bot works with ("all" uses every account).',
 			build: (sub) => {
 				sub.addStringOption((option) =>
 					option
@@ -245,15 +249,14 @@ export const questCommand = group(
 				);
 			},
 			run: async (context: CommandContext) => {
-				const { interaction, services } = context;
-				assertAdmin(context);
+				const { interaction, services, scope } = context;
 
 				const value = (
 					interaction.options.getString('account', true) ?? ''
 				).trim();
 
 				if (value.toLowerCase() === 'all') {
-					services.autoService.setDefaultAccount(null);
+					services.autoService.setDefaultAccount(scope, null);
 					await interaction.reply({
 						embeds: [
 							successEmbed(
@@ -265,7 +268,7 @@ export const questCommand = group(
 					return;
 				}
 
-				services.autoService.setDefaultAccount(value);
+				services.autoService.setDefaultAccount(scope, value);
 				await interaction.reply({
 					embeds: [
 						successEmbed(
@@ -289,19 +292,19 @@ export const questCommand = group(
 				accountOption(sub);
 			},
 			run: async (context: CommandContext) => {
-				const { interaction, services } = context;
+				const { interaction, services, scope } = context;
 
-				if (!services.autoService.enabled) {
+				if (!services.autoService.enabled(scope)) {
 					await interaction.reply({
 						content:
-							'The automation is disabled. Add an account with `/token add <label> <token> user` or set USER_TOKEN in the environment.',
+							'You have no account yet. Add one with `/room add`, or use `/token add` if you are an admin.',
 						flags: MessageFlags.Ephemeral,
 					});
 					return;
 				}
 
 				if (interaction.options.getBoolean('stop')) {
-					services.autoService.requestStop();
+					services.autoService.requestStop(scope);
 					await interaction.reply({
 						content:
 							'🛑 The queue will stop after the current quest.',
@@ -310,7 +313,7 @@ export const questCommand = group(
 					return;
 				}
 
-				if (services.autoService.isRunning) {
+				if (services.autoService.isRunning(scope)) {
 					await interaction.reply({
 						content:
 							'A quest queue is already running - stop it with `/quest all stop` first.',
@@ -320,12 +323,15 @@ export const questCommand = group(
 				}
 
 				const account = services.autoService.resolveAccount(
+					scope,
 					interaction.options.getString('account'),
 				);
 
 				// The plan is fetched once, so the queue view and the
 				// progress that is reported later always match.
-				const plan = await services.autoService.planQueue({ account });
+				const plan = await services.autoService.planQueue(scope, {
+					account,
+				});
 				const accounts = [...new Set(plan.map((job) => job.account))];
 
 				const entries: QueueEntry[] = plan.map((job) => ({
@@ -394,6 +400,7 @@ export const questCommand = group(
 
 				try {
 					summary = await services.autoService.runAll(
+						scope,
 						async (quest, progress, index) => {
 							const entry = entries[index];
 							if (!entry) return;
@@ -459,18 +466,18 @@ export const questCommand = group(
 				accountOption(sub);
 			},
 			run: async (context: CommandContext) => {
-				const { interaction, services } = context;
+				const { interaction, services, scope } = context;
 
-				if (!services.autoService.enabled) {
+				if (!services.autoService.enabled(scope)) {
 					await interaction.reply({
 						content:
-							'The automation is disabled. Add an account with `/token add <label> <token> user` or set USER_TOKEN in the environment.',
+							'You have no account yet. Add one with `/room add`, or use `/token add` if you are an admin.',
 						flags: MessageFlags.Ephemeral,
 					});
 					return;
 				}
 
-				if (services.autoService.isRunning) {
+				if (services.autoService.isRunning(scope)) {
 					await interaction.reply({
 						content:
 							'A quest queue is already running - stop it with `/quest all stop` first.',
@@ -480,13 +487,14 @@ export const questCommand = group(
 				}
 
 				const account = services.autoService.resolveAccount(
+					scope,
 					interaction.options.getString('account'),
 				);
 				const questId = interaction.options.getString('quest', true);
 
 				// Every account that offers the quest works on it - they all
 				// start at the same time.
-				const plan = await services.autoService.planQueue({
+				const plan = await services.autoService.planQueue(scope, {
 					account,
 					quest: questId,
 				});
@@ -516,11 +524,15 @@ export const questCommand = group(
 				>;
 
 				try {
-					summary = await services.autoService.runAll(undefined, {
-						account,
-						quest: questId,
-						plan,
-					});
+					summary = await services.autoService.runAll(
+						scope,
+						undefined,
+						{
+							account,
+							quest: questId,
+							plan,
+						},
+					);
 				} catch (error) {
 					await interaction.followUp({
 						content: toUserMessage(error),
@@ -544,11 +556,11 @@ export const questCommand = group(
 			name: 'refresh',
 			description: 'Refresh the quest information the bot knows about.',
 			run: async (context: CommandContext) => {
-				const { interaction, services, userId } = context;
-				const result = await services.questService.refresh(userId);
+				const { interaction, services, scope } = context;
+				const result = await services.questService.refresh(scope);
 
 				for (const quest of result.quests.slice(0, 50)) {
-					services.questService.recordProgress(userId, quest);
+					services.questService.recordProgress(scope.userId, quest);
 				}
 
 				await interaction.reply({

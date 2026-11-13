@@ -1,10 +1,13 @@
 const { loadConfig } = require('../bot/config');
 
-const REQUIRED = ['DISCORD_BOT_TOKEN', 'DISCORD_CLIENT_ID'];
+const REQUIRED = [
+	'DISCORD_BOT_TOKEN',
+	'DISCORD_CLIENT_ID',
+	'ENCRYPTION_KEY',
+];
 const OPTIONAL = [
 	'DISCORD_CLIENT_SECRET',
 	'DISCORD_REDIRECT_URI',
-	'ENCRYPTION_KEY',
 	'OWNER_ID',
 	'ADMIN_ROLE_ID',
 	'GUILD_ID',

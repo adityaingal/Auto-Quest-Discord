@@ -6,6 +6,7 @@ import { QuestDetail, QuestView } from '../models/quest';
 import { QuestEligibility } from '../models/enums';
 import { toQuestViewFromPayload } from './questAdapter';
 import { AutoService } from './autoService';
+import { AccountScope } from './scope';
 import {
 	AuthorizationError,
 	IntegrationUnavailableError,
@@ -29,6 +30,10 @@ function isFallbackError(error: unknown): boolean {
  * Quest orchestration. The parsing stays in the legacy engine (src/quest.ts);
  * this service only combines the providers, persists results and answers the
  * questions the commands ask.
+ *
+ * Every method works inside a scope. The live data is read from the
+ * accounts of that scope, so a user only ever sees their own accounts - the
+ * accounts of the operator are never used as a fallback.
  */
 export class QuestService {
 	constructor(
@@ -45,33 +50,37 @@ export class QuestService {
 	/**
 	 * The user session the live data is read from: the named account, the
 	 * account selected with "/quest switch" or - when nothing is selected -
-	 * the first account that answers.
+	 * the first account of the scope that answers.
 	 */
-	private liveAccount(account?: string | null): string | undefined {
+	private liveAccount(
+		scope: AccountScope,
+		account?: string | null,
+	): string | undefined {
 		const wanted = account?.trim();
 		if (wanted) return wanted;
 
-		return this.autoService?.defaultAccount ?? undefined;
+		return this.autoService?.defaultAccount(scope) ?? undefined;
 	}
 
 	/**
-	 * Lists quests. Live data is preferred when the user has a linked account
-	 * and Discord actually serves it, otherwise the catalogue is used.
+	 * Lists quests. Live data is preferred when the scope has an account and
+	 * Discord actually serves it, otherwise the catalogue is used.
 	 *
 	 * `account` selects the user session the live data is read from. Without
 	 * it the account selected with "/quest switch" is used.
 	 */
 	async list(
-		discordUserId: string,
+		scope: AccountScope,
 		account?: string | null,
 	): Promise<{
 		quests: QuestView[];
 		source: string;
 		live: boolean;
 	}> {
-		// A configured user session serves the real quest list of the account.
+		// The accounts of this scope serve the real quest list.
 		const live = await this.autoService?.listLiveQuests(
-			this.liveAccount(account),
+			scope,
+			this.liveAccount(scope, account),
 		);
 		if (live && live.quests.length > 0) {
 			return {
@@ -82,7 +91,7 @@ export class QuestService {
 		}
 
 		try {
-			const quests = await this.linked.listFor(discordUserId);
+			const quests = await this.linked.listFor(scope.userId);
 			return { quests, source: this.linked.name, live: true };
 		} catch (error) {
 			if (!isFallbackError(error)) throw error;
@@ -94,13 +103,14 @@ export class QuestService {
 
 	async get(
 		questId: string,
-		discordUserId: string,
+		scope: AccountScope,
 		account?: string | null,
 	): Promise<QuestDetail> {
-		// Live quests of the configured account come first - their ids differ
-		// from the catalogue snapshot.
+		// Live quests of the accounts of this scope come first - their ids
+		// differ from the catalogue snapshot.
 		const live = await this.autoService?.listLiveQuests(
-			this.liveAccount(account),
+			scope,
+			this.liveAccount(scope, account),
 		);
 		const liveQuest = live?.quests.find(
 			(entry) =>
@@ -122,7 +132,7 @@ export class QuestService {
 		}
 
 		try {
-			return await this.linked.require(questId, discordUserId);
+			return await this.linked.require(questId, scope.userId);
 		} catch (error) {
 			if (!isFallbackError(error)) throw error;
 		}
@@ -132,11 +142,11 @@ export class QuestService {
 
 	async status(
 		questId: string,
-		discordUserId: string,
+		scope: AccountScope,
 		account?: string | null,
 	): Promise<QuestDetail> {
-		const quest = await this.get(questId, discordUserId, account);
-		const stored = this.repositories.getProgress(discordUserId, questId);
+		const quest = await this.get(questId, scope, account);
+		const stored = this.repositories.getProgress(scope.userId, questId);
 
 		if (stored && !quest.progress) {
 			quest.progress = {
@@ -159,9 +169,9 @@ export class QuestService {
 	 */
 	async start(
 		questId: string,
-		discordUserId: string,
+		scope: AccountScope,
 	): Promise<{ started: boolean; message: string; quest: QuestDetail }> {
-		const quest = await this.get(questId, discordUserId);
+		const quest = await this.get(questId, scope);
 
 		if (quest.eligibility === QuestEligibility.UNAVAILABLE) {
 			throw new ValidationError(
@@ -176,7 +186,7 @@ export class QuestService {
 		}
 
 		this.repositories.addHistory(
-			discordUserId,
+			scope.userId,
 			questId,
 			'start_requested',
 			quest.eligibility,
@@ -194,9 +204,9 @@ export class QuestService {
 	 * Refreshes the stored quest catalogue and returns what changed.
 	 */
 	async refresh(
-		discordUserId: string,
+		scope: AccountScope,
 	): Promise<{ quests: QuestView[]; source: string; live: boolean }> {
-		const result = await this.list(discordUserId);
+		const result = await this.list(scope);
 
 		this.repositories.transaction(() => {
 			for (const quest of result.quests) {

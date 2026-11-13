@@ -51,12 +51,21 @@ function readDotEnv(
 /**
  * Derives a 32 byte key for AES-256-GCM. ENCRYPTION_KEY is preferred,
  * otherwise the client secret is used so a single secret has to be configured.
+ *
+ * There is no fallback key: a published default would let everybody decrypt
+ * every stored token. The bot refuses to start without a real secret.
  */
 function deriveKey(env: NodeJS.ProcessEnv): Buffer {
 	const secret =
-		env.ENCRYPTION_KEY?.trim() ||
-		env.DISCORD_CLIENT_SECRET?.trim() ||
-		'discord-quest-completer-development-key';
+		env.ENCRYPTION_KEY?.trim() || env.DISCORD_CLIENT_SECRET?.trim();
+
+	if (!secret) {
+		throw new ConfigError(
+			'ENCRYPTION_KEY is not set. It protects every stored token, so the ' +
+				'bot refuses to start without it. Generate one with ' +
+				'"openssl rand -hex 32" and put it into the environment or the .env file.',
+		);
+	}
 
 	return Buffer.from(
 		require('node:crypto')

@@ -14,8 +14,10 @@ import { NotificationService } from './notificationService';
 import { AdminService } from './adminService';
 import { TokenService } from './tokenService';
 import { AutoService, SessionEntry } from './autoService';
+import { RoomService } from './roomService';
 import { Notifier } from './notifier';
 import { UserSession } from '../integrations/userSession';
+import { AccountScope, scopeKey } from './scope';
 
 /** The configuration key that holds the account the commands work with. */
 export const DEFAULT_ACCOUNT_KEY = 'auto.default_account';
@@ -33,9 +35,12 @@ export type Services = {
 	notificationService: NotificationService;
 	adminService: AdminService;
 	tokenService: TokenService;
+	roomService: RoomService;
 	autoService: AutoService;
 	notifier: Notifier;
 	client: Client;
+	/** Builds the scope of a user - it decides what the user may reach. */
+	scopeFor: (userId: string) => AccountScope;
 	/** Injected by the entry point to avoid a circular import. */
 	registerCommands: (() => Promise<number>) | null;
 };
@@ -70,54 +75,102 @@ export function createServices(
 	);
 
 	const tokenService = new TokenService(repositories, vault);
+	const roomService = new RoomService(repositories, vault);
 
-	// Optional: user sessions let the bot read live quest data and automate
-	// the supported quest types. They come either from the USER_TOKEN
-	// environment variable or from the user tokens registered with
-	// "/token add" (type user). The list is resolved on every use, so a token
-	// that was just registered works immediately.
-	//
+	const adminService = new AdminService(
+		repositories,
+		database,
+		config,
+	);
+
+	/**
+	 * The scope of a user. Only the owner and the members of the admin role
+	 * may use the operator level accounts that are registered with
+	 * "/token add"; everybody else only reaches the accounts of their own
+	 * rooms.
+	 */
+	const scopeFor = (userId: string): AccountScope => {
+		const isOperator =
+			Boolean(config.ownerId && config.ownerId === userId) ||
+			adminService.isWhitelistedAdmin(userId);
+
+		return { userId, isOperator };
+	};
+
 	// The session objects are cached per label, so the encrypted tokens are
 	// not decrypted again for every single request. A token that was replaced
 	// under the same label gets a new session.
 	const sessionCache = new Map<string, { token: string; session: UserSession }>();
 
+	const sessionFor = (
+		label: string,
+		token: string,
+	): UserSession => {
+		const cached = sessionCache.get(label);
+
+		if (!cached || cached.token !== token) {
+			sessionCache.set(label, {
+				token,
+				session: new UserSession(token),
+			});
+		}
+
+		return sessionCache.get(label)!.session;
+	};
+
 	const autoService = new AutoService(
-		() => {
+		(scope: AccountScope): SessionEntry[] => {
 			const sessions: SessionEntry[] = [];
 
-			const envSession = UserSession.fromEnvironment();
-			if (envSession) {
-				sessions.push({ label: 'USER_TOKEN', session: envSession });
+			// The accounts of the rooms of this user. They are always private
+			// to their owner.
+			for (const entry of roomService.accountsWithTokens(
+				scope.userId,
+			)) {
+				sessions.push({
+					label: entry.label,
+					session: sessionFor(entry.label, entry.token),
+				});
 			}
 
-			for (const entry of tokenService.resolveUserSessions()) {
-				if (sessions.some((existing) => existing.label === entry.label)) {
-					continue;
-				}
+			// The operator level accounts are only reachable for the owner
+			// and the admins.
+			if (scope.isOperator) {
+				const envSession = UserSession.fromEnvironment();
 
-				const cached = sessionCache.get(entry.label);
-				if (!cached || cached.token !== entry.token) {
-					sessionCache.set(entry.label, {
-						token: entry.token,
-						session: new UserSession(entry.token),
+				if (envSession) {
+					sessions.push({
+						label: 'USER_TOKEN',
+						session: envSession,
 					});
 				}
 
-				sessions.push({
-					label: entry.label,
-					session: sessionCache.get(entry.label)!.session,
-				});
+				for (const entry of tokenService.resolveUserSessions()) {
+					if (
+						sessions.some(
+							(existing) => existing.label === entry.label,
+						)
+					) {
+						continue;
+					}
+
+					sessions.push({
+						label: entry.label,
+						session: sessionFor(entry.label, entry.token),
+					});
+				}
 			}
 
 			return sessions;
 		},
 		{
-			// The account the commands work with. It survives a restart.
-			readDefaultAccount: () =>
-				repositories.getConfig(DEFAULT_ACCOUNT_KEY) || null,
-			writeDefaultAccount: (label) => {
-				repositories.setConfig(DEFAULT_ACCOUNT_KEY, label ?? '');
+			// The account the commands work with. It survives a restart and
+			// belongs to the user, so one user never changes the selection of
+			// another one.
+			readDefaultAccount: (scope) =>
+				repositories.getConfig(scopeKey(scope)) || null,
+			writeDefaultAccount: (scope, label) => {
+				repositories.setConfig(scopeKey(scope), label ?? '');
 			},
 		},
 	);
@@ -135,11 +188,8 @@ export function createServices(
 		repositories,
 		questService,
 		progressService,
-	);
-	const adminService = new AdminService(
-		repositories,
-		database,
-		config,
+		scopeFor,
+		roomService,
 	);
 
 	const notifier = new Notifier();
@@ -157,9 +207,11 @@ export function createServices(
 		notificationService,
 		adminService,
 		tokenService,
+		roomService,
 		autoService,
 		notifier,
 		client,
+		scopeFor,
 		registerCommands: null,
 	};
 }

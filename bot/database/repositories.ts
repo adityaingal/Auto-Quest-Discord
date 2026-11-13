@@ -47,6 +47,38 @@ export type HistoryRow = {
 	created_at: string;
 };
 
+export type RoomRow = {
+	id: number;
+	owner_user_id: string;
+	name: string;
+	description: string | null;
+	webhook_id: string | null;
+	webhook_token: string | null;
+	webhook_reveal: number;
+	created_at: string;
+	updated_at: string;
+	expires_at: string;
+};
+
+export type RoomAccountRow = {
+	id: number;
+	room_id: number;
+	slot: number;
+	token: string;
+	account_id: string | null;
+	account_username: string | null;
+	status: string;
+	created_at: string;
+	last_checked_at: string | null;
+};
+
+/**
+ * The temporary offset used while the slots of a room are re-sequenced. It is
+ * far above any realistic slot number, so the shifted rows cannot collide
+ * with the rows that stayed in place.
+ */
+const SHIFT_OFFSET = 1_000_000;
+
 export class Repositories {
 	constructor(private readonly db: Database) {}
 
@@ -149,6 +181,45 @@ export class Repositories {
 			discordUserId,
 		);
 		return Number(result.changes ?? 0);
+	}
+
+	/**
+	 * Deletes everything that belongs to a user: the link, the rooms with
+	 * their accounts, the progress, the history, the rewards and the
+	 * notification settings. This is what the privacy notice promises.
+	 */
+	purgeUser(discordUserId: string): void {
+		this.db.transaction(() => {
+			this.db.run(
+				'DELETE FROM room_accounts WHERE room_id IN (SELECT id FROM rooms WHERE owner_user_id = ?)',
+				discordUserId,
+			);
+			this.db.run('DELETE FROM rooms WHERE owner_user_id = ?', discordUserId);
+			this.db.run(
+				'DELETE FROM account_links WHERE discord_user_id = ?',
+				discordUserId,
+			);
+			this.db.run(
+				'DELETE FROM quest_progress WHERE discord_user_id = ?',
+				discordUserId,
+			);
+			this.db.run(
+				'DELETE FROM quest_history WHERE discord_user_id = ?',
+				discordUserId,
+			);
+			this.db.run(
+				'DELETE FROM reward_records WHERE discord_user_id = ?',
+				discordUserId,
+			);
+			this.db.run(
+				'DELETE FROM notification_settings WHERE discord_user_id = ?',
+				discordUserId,
+			);
+			this.db.run(
+				'DELETE FROM oauth_states WHERE discord_user_id = ?',
+				discordUserId,
+			);
+		});
 	}
 
 	// ------------------------------------------------------- oauth states
@@ -641,11 +712,11 @@ export class Repositories {
 	// ------------------------------------------------------------- config
 
 	setConfig(key: string, value: string): void {		this.db.run(
-			`INSERT INTO bot_config (key, value) VALUES (?, ?)
+		`INSERT INTO bot_config (key, value) VALUES (?, ?)
 			 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-			key,
-			value,
-		);
+		key,
+		value,
+	);
 	}
 
 	getConfig(key: string): string | undefined {
@@ -660,5 +731,222 @@ export class Repositories {
 			'SELECT key, value FROM bot_config',
 		);
 		return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+	}
+
+	// -------------------------------------------------------------- rooms
+
+	/**
+	 * Creates a room. The name is unique per owner - two users may use the
+	 * same name, but one user may not have it twice.
+	 */
+	createRoom(row: {
+		owner_user_id: string;
+		name: string;
+		description?: string | null;
+		expires_at: string;
+	}): number {
+		return this.db.insert(
+			`INSERT INTO rooms (owner_user_id, name, description, expires_at)
+			 VALUES (?, ?, ?, ?)`,
+			row.owner_user_id,
+			row.name,
+			row.description ?? null,
+			row.expires_at,
+		);
+	}
+
+
+	/** The room of one owner - the owner scope is what makes it private. */
+	getRoom(ownerUserId: string, name: string): RoomRow | undefined {
+		return this.db.get<RoomRow>(
+			'SELECT * FROM rooms WHERE owner_user_id = ? AND name = ?',
+			ownerUserId,
+			name,
+		);
+	}
+
+	getRoomById(id: number): RoomRow | undefined {
+		return this.db.get<RoomRow>('SELECT * FROM rooms WHERE id = ?', id);
+	}
+
+	listRooms(ownerUserId: string): RoomRow[] {
+		return this.db.all<RoomRow>(
+			'SELECT * FROM rooms WHERE owner_user_id = ? ORDER BY created_at DESC',
+			ownerUserId,
+		);
+	}
+
+	/** Every room of every owner - used by the expiry sweep only. */
+	listAllRooms(): RoomRow[] {
+		return this.db.all<RoomRow>('SELECT * FROM rooms ORDER BY id ASC');
+	}
+
+	/** Rooms whose 30 day lifetime is over. */
+	listExpiredRooms(now: string): RoomRow[] {
+		return this.db.all<RoomRow>(
+			'SELECT * FROM rooms WHERE expires_at <= ? ORDER BY id ASC',
+			now,
+		);
+	}
+
+	/** Rooms that expire within the given window (for the warning). */
+	listExpiringRooms(now: string, until: string): RoomRow[] {
+		return this.db.all<RoomRow>(
+			'SELECT * FROM rooms WHERE expires_at > ? AND expires_at <= ? ORDER BY id ASC',
+			now,
+			until,
+		);
+	}
+
+	updateRoom(
+		id: number,
+		fields: {
+			name?: string;
+			description?: string | null;
+			webhook_id?: string | null;
+			webhook_token?: string | null;
+			webhook_reveal?: number;
+			expires_at?: string;
+		},
+	): void {
+		const sets: string[] = [];
+		const params: unknown[] = [];
+
+		if (fields.name !== undefined) {
+			sets.push('name = ?');
+			params.push(fields.name);
+		}
+
+		if (fields.description !== undefined) {
+			sets.push('description = ?');
+			params.push(fields.description);
+		}
+
+		if (fields.webhook_id !== undefined) {
+			sets.push('webhook_id = ?');
+			params.push(fields.webhook_id);
+		}
+
+		if (fields.webhook_token !== undefined) {
+			sets.push('webhook_token = ?');
+			params.push(fields.webhook_token);
+		}
+
+		if (fields.webhook_reveal !== undefined) {
+			sets.push('webhook_reveal = ?');
+			params.push(fields.webhook_reveal);
+		}
+
+		if (fields.expires_at !== undefined) {
+			sets.push('expires_at = ?');
+			params.push(fields.expires_at);
+		}
+
+		if (sets.length === 0) return;
+
+		sets.push("updated_at = datetime('now')");
+		params.push(id);
+
+		this.db.run(
+			`UPDATE rooms SET ${sets.join(', ')} WHERE id = ?`,
+			...params,
+		);
+	}
+
+	deleteRoom(id: number): number {
+		const result = this.db.run('DELETE FROM rooms WHERE id = ?', id);
+		return result.changes;
+	}
+
+	// ------------------------------------------------------- room accounts
+
+	/** The next free slot of a room - the slots are 1, 2, 3, ... without gaps. */
+	nextRoomSlot(roomId: number): number {
+		const row = this.db.get<{ slot: number | null }>(
+			'SELECT MAX(slot) AS slot FROM room_accounts WHERE room_id = ?',
+			roomId,
+		);
+
+		return (row?.slot ?? 0) + 1;
+	}
+
+	addRoomAccount(row: {
+		room_id: number;
+		slot: number;
+		token: string;
+		account_id?: string | null;
+		account_username?: string | null;
+	}): void {
+		this.db.run(
+			`INSERT INTO room_accounts
+				(room_id, slot, token, account_id, account_username, status)
+			 VALUES (?, ?, ?, ?, ?, 'active')`,
+			row.room_id,
+			row.slot,
+			row.token,
+			row.account_id ?? null,
+			row.account_username ?? null,
+		);
+	}
+
+	listRoomAccounts(roomId: number): RoomAccountRow[] {
+		return this.db.all<RoomAccountRow>(
+			'SELECT * FROM room_accounts WHERE room_id = ? ORDER BY slot ASC',
+			roomId,
+		);
+	}
+
+	getRoomAccount(roomId: number, slot: number): RoomAccountRow | undefined {
+		return this.db.get<RoomAccountRow>(
+			'SELECT * FROM room_accounts WHERE room_id = ? AND slot = ?',
+			roomId,
+			slot,
+		);
+	}
+
+	touchRoomAccount(id: number, status: string): void {
+		this.db.run(
+			`UPDATE room_accounts SET status = ?, last_checked_at = datetime('now') WHERE id = ?`,
+			status,
+			id,
+		);
+	}
+
+	/**
+	 * Removes an account and closes the gap: the slots after the removed one
+	 * move up by one, so the room always has the sequence 1, 2, 3, ... and the
+	 * next account continues where the queue ended.
+	 *
+	 * The shift runs in two phases. A single "slot = slot - 1" would break the
+	 * UNIQUE(room_id, slot) constraint, because the row that moves into an
+	 * occupied slot is checked before the row that vacates it. The rows are
+	 * therefore pushed out of the way first and moved back afterwards.
+	 */
+	deleteRoomAccount(roomId: number, slot: number): number {
+		return this.db.transaction(() => {
+			const removed = this.db.run(
+				'DELETE FROM room_accounts WHERE room_id = ? AND slot = ?',
+				roomId,
+				slot,
+			).changes;
+
+			if (removed > 0) {
+				this.db.run(
+					'UPDATE room_accounts SET slot = slot + ? WHERE room_id = ? AND slot > ?',
+					SHIFT_OFFSET,
+					roomId,
+					slot,
+				);
+
+				this.db.run(
+					'UPDATE room_accounts SET slot = slot - ? WHERE room_id = ? AND slot >= ?',
+					SHIFT_OFFSET + 1,
+					roomId,
+					SHIFT_OFFSET + slot + 1,
+				);
+			}
+
+			return removed;
+		});
 	}
 }

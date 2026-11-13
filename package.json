@@ -1,24 +1,23 @@
 {
   "name": "discord-quest-completer-bot",
-  "version": "2.0.0",
-  "description": "Discord Quest Completer - professional slash command bot",
+  "version": "2.1.0",
+  "description": "Discord Quest Completer - slash command bot with live quest tracking, per-user account rooms and optional quest automation",
   "main": "dist/bot/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/bot/index.js",
     "dev": "tsx watch bot/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test tests/*.test.ts",
-    "check-env": "tsx scripts/check-env.ts",
-    "migrate": "tsx bot/cli/migrate.ts"
+    "test": "node --import tsx --test \"tests/**/*.test.ts\"",
+    "check-env": "tsx scripts/check-env.ts"
   },
   "keywords": [
     "discord",
     "quests",
     "bot"
   ],
-  "author": "User",
-  "license": "ISC",
+  "author": "adityaingal",
+  "license": "GPL-3.0-or-later",
   "type": "commonjs",
   "engines": {
     "node": ">=22.5.0"

@@ -2,13 +2,13 @@ import {
 	ActionRowBuilder,
 	ButtonBuilder,
 	ButtonStyle,
-	ChatInputCommandInteraction,
-	MessageFlags,
 	Interaction,
 	InteractionType,
+	MessageFlags,
 	StringSelectMenuBuilder,
 } from 'discord.js';
 import { Services } from '../services';
+import { AccountScope } from '../services/scope';
 import { Logger } from '../utils/logger';
 import { toUserMessage } from '../utils/errors';
 import { buildQuestPages, buildQuestSelect, buildPagingRow } from '../ui/components';
@@ -90,6 +90,18 @@ export class InteractionRouter {
 		return interaction.user.id;
 	}
 
+	/**
+	 * The scope of the user that clicked the button. It is derived from the
+	 * user id, so a component interaction can never reach more than the
+	 * matching command would.
+	 */
+	private scope(
+		interaction: Interaction,
+		services: Services,
+	): AccountScope {
+		return services.scopeFor(interaction.user.id);
+	}
+
 	private async handleQuestSelect(
 		interaction: Interaction,
 		services: Services,
@@ -109,7 +121,7 @@ export class InteractionRouter {
 
 		const quest = await services.questService.get(
 			value,
-			this.userId(interaction),
+			this.scope(interaction, services),
 		);
 
 		await interaction.update({
@@ -141,7 +153,7 @@ export class InteractionRouter {
 
 		const page = Number(interaction.customId.split(':')[2] ?? 0);
 		const { quests, source, live } = await services.questService.list(
-			this.userId(interaction),
+			this.scope(interaction, services),
 		);
 		const pages = buildQuestPages(quests);
 		const safePage = Math.min(Math.max(page, 0), pages.length - 1);
@@ -164,7 +176,7 @@ export class InteractionRouter {
 		const questId = interaction.customId.split(':')[2];
 		const quest = await services.questService.get(
 			questId,
-			this.userId(interaction),
+			this.scope(interaction, services),
 		);
 
 		await interaction.update({ embeds: [questDetailEmbed(quest)] });
@@ -179,7 +191,7 @@ export class InteractionRouter {
 		const questId = interaction.customId.split(':')[2];
 		const quest = await services.questService.status(
 			questId,
-			this.userId(interaction),
+			this.scope(interaction, services),
 		);
 
 		services.questService.recordProgress(
@@ -202,7 +214,7 @@ export class InteractionRouter {
 		const questId = interaction.customId.split(':')[2];
 		const quest = await services.questService.get(
 			questId,
-			this.userId(interaction),
+			this.scope(interaction, services),
 		);
 
 		const lines = quest.tasks.length
@@ -236,7 +248,7 @@ export class InteractionRouter {
 		const questId = interaction.customId.split(':')[2];
 		const result = await services.questService.start(
 			questId,
-			this.userId(interaction),
+			this.scope(interaction, services),
 		);
 
 		await interaction.update({
@@ -268,7 +280,11 @@ export class InteractionRouter {
 	): Promise<void> {
 		if (!interaction.isMessageComponent()) return;
 
-		if (!isAdmin(contextOf(interaction, services))) {
+		if (!isAdmin({
+			services,
+			userId: interaction.user.id,
+			member: interaction.member,
+		})) {
 			await interaction.reply({
 				content: 'Only admins can change the maintenance mode.',
 				flags: MessageFlags.Ephemeral,
@@ -302,25 +318,4 @@ export class InteractionRouter {
 			components: [],
 		});
 	}
-}
-
-/**
- * Builds the minimal context the admin check needs from a component
- * interaction.
- */
-function contextOf(
-	interaction: Interaction,
-	services: Services,
-): {
-	interaction: ChatInputCommandInteraction;
-	services: Services;
-	userId: string;
-	guildId: string | null;
-} {
-	return {
-		interaction: interaction as unknown as ChatInputCommandInteraction,
-		services,
-		userId: interaction.user.id,
-		guildId: interaction.guildId,
-	};
 }

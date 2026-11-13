@@ -165,8 +165,15 @@ export class AccountService {
 		};
 	}
 
+	/**
+	 * Removes the link and every other piece of data of the user. The
+	 * privacy notice promises that the data is gone afterwards, so the
+	 * progress, the history and the rooms are deleted as well.
+	 */
 	unlink(discordUserId: string): number {
-		return this.repositories.unlinkAll(discordUserId);
+		const removed = this.repositories.unlinkAll(discordUserId);
+		this.repositories.purgeUser(discordUserId);
+		return removed;
 	}
 
 	/**
@@ -234,19 +241,21 @@ export class AccountService {
 			'• The linked account id and username of the account you authorise.',
 			'• An encrypted OAuth2 access token and refresh token (AES-256-GCM).',
 			'• Quest progress, reward status and command history for your account.',
+			'• The rooms you create, including the accounts you add to them.',
 			'',
 			'**What is never stored**',
 			'• Your Discord password.',
-			'• Raw user tokens - the bot never asks for one.',
-			'• Message content of other users.',
+			'• The content of the messages of other users.',
 			'',
 			'**Who can see it**',
-			'• Only you. Account data is never shown to other members.',
+			'• Only you. A room belongs to the account that created it and nobody else can read it.',
 			'• The bot owner can see aggregate statistics (counts only, never tokens).',
 			'',
 			'**How to remove it**',
-			'• `/account unlink` deletes the stored tokens and the link immediately.',
-			'• The owner can purge a user entry with `/admin maintenance purge user:<id>`.',
+			'• `/account unlink` deletes the stored tokens, the link, your rooms and your progress immediately.',
+			'• `/room delete` deletes a room with every account in it.',
+			'• Every room is reset automatically after 30 days.',
+			'• The owner can delete a user entry with `/admin purge user:<id>`.',
 		];
 	}
 

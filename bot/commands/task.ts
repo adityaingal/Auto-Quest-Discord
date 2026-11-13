@@ -80,9 +80,9 @@ export const taskCommand = group(
 				);
 			},
 			run: async (context: CommandContext) => {
-				const { interaction, services, userId } = context;
+				const { interaction, services, scope } = context;
 				const task = interaction.options.getString('task', true);
-				const { quests } = await services.questService.list(userId);
+				const { quests } = await services.questService.list(scope);
 
 				const matching = quests.filter((quest) =>
 					quest.taskTypes.includes(task),
@@ -166,13 +166,13 @@ export const taskCommand = group(
 				);
 			},
 			run: async (context: CommandContext) => {
-				const { interaction, services, userId } = context;
+				const { interaction, services, scope } = context;
 				const questId = interaction.options.getString('quest', true);
 
 				try {
 					const quest = await services.questService.status(
 						questId,
-						userId,
+						scope,
 					);
 
 					if (!quest.live) {

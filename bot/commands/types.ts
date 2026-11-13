@@ -6,12 +6,18 @@ import {
 	SlashCommandSubcommandGroupBuilder,
 } from 'discord.js';
 import { Services } from '../services';
+import { AccountScope } from '../services/scope';
 
 export type CommandContext = {
 	interaction: ChatInputCommandInteraction;
 	services: Services;
 	userId: string;
 	guildId: string | null;
+	/**
+	 * What the caller may reach. It is built from the user id, so it always
+	 * matches the account that runs the command.
+	 */
+	scope: AccountScope;
 };
 
 export type CommandHandler = (context: CommandContext) => Promise<void>;

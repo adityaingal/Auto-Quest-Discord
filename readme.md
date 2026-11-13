@@ -4,6 +4,10 @@
 > Home), their requirements, progress and rewards - driven entirely through
 > slash commands.
 >
+> Every user gets their own **rooms** for the accounts they want to work
+> with. A room is private to the user who created it, and it can be mirrored
+> to another server with a webhook.
+>
 > This is the 2.0 rewrite of the original selfbot. The quest engine and the
 > configuration parser were kept; the user-token automation was replaced by
 > official bot authentication and OAuth2 account linking.
@@ -15,14 +19,15 @@
 
 | | |
 | --- | --- |
-| 🧩 **Slash commands only** | 26 commands in 5 groups, no prefix commands |
+| 🧩 **Slash commands only** | 7 command groups, no prefix commands |
 | 🔎 **Quest intelligence** | task types, requirements, platforms, rewards, eligibility |
-| 🔐 **Official OAuth2 linking** | encrypted token storage, single-use state, revocable |
+| 🏠 **Private rooms** | every user owns their rooms and their accounts - nobody else sees them |
+| 🔗 **Webhooks** | a room can post its changes to a webhook in another server |
 | 🗄️ **SQLite persistence** | versioned migrations, progress history, admin audit log |
 | 🔔 **Notifications** | new quests, progress, completion, reward and expiry events |
 | 🎨 **Rich UI** | embeds, progress bars, dropdowns, pagination, confirmation buttons |
 | 🩺 **Health endpoint** | `/health` for hosting platforms, graceful shutdown |
-| 🛡️ **Safe by design** | no selfbot, no user tokens, no captcha automation |
+| 🛡️ **Safe by design** | encrypted token vault, per user scoping, no selfbot |
 
 ---
 
@@ -37,8 +42,8 @@
 ## Installation
 
 ```bash
-git clone <your-repo> discord-quest-completer
-cd discord-quest-completer
+git clone https://github.com/adityaingal/Auto-Quest-Discord.git
+cd Auto-Quest-Discord
 npm install
 cp .env.example .env      # then fill it in
 npm run build
@@ -54,8 +59,8 @@ npm start
    (local development: `http://localhost:3000/oauth/callback`)
 5. **OAuth2 -> URL Configuration** -> copy the **Client Secret** into
    `DISCORD_CLIENT_SECRET`
-6. **Bot -> Privileged Gateway Intents** -> enable *Message Content* if you
-   want the bot to read command context in DMs
+6. **Bot -> Privileged Gateway Intents** -> leave everything **off**. The bot
+   only needs the `Guilds` intent and never reads messages.
 
 ### 2. Configure
 
@@ -67,6 +72,11 @@ DISCORD_REDIRECT_URI=http://localhost:3000/oauth/callback
 OWNER_ID=your-discord-user-id
 ENCRYPTION_KEY=some-long-random-string
 ```
+
+> `ENCRYPTION_KEY` is **required**. It protects every stored token. Without
+> it the bot refuses to start - there is no default key, because a published
+> default would let everybody decrypt the database. Generate one with
+> `openssl rand -hex 32`.
 
 ### 3. Invite the bot
 
@@ -91,15 +101,40 @@ registered globally (Discord can take up to an hour to propagate).
 | `/quest list [account]` | All available quests with id, application and eligibility (dropdown + pagination) |
 | `/quest info <quest> [account]` | Full details: task types, requirements, platform, rewards |
 | `/quest start` | Eligibility check and the official enrolment route (confirmation buttons) |
-| `/quest auto <quest> [account]` | Complete one quest with the configured user session |
+| `/quest auto <quest> [account]` | Complete one quest with your account |
 | `/quest all [account]` | Complete every available quest - **all accounts start at the same time** |
 | `/quest all stop` | Stop the running queue after the current quest |
-| `/quest sessions` | The user accounts (sessions) the bot works with - no token is shown |
+| `/quest sessions` | Your accounts - no token is shown |
 | `/quest switch <account>` | Choose the account the bot works with (`all` uses every account) |
 | `/quest progress` | Recorded progress with progress bars |
 | `/quest status <quest> [account]` | Status of one quest for your account |
 | `/quest refresh` | Refresh the quest information and store it |
 | `/quest history` | Your recent quest activity |
+
+### `/room`
+
+A room is your own container for accounts. Only you can see it.
+
+| Subcommand | Description |
+| --- | --- |
+| `/room create <name> [description] [webhook]` | Create a room. It is reset automatically after 30 days |
+| `/room search <name>` | Find your rooms by name and see their accounts |
+| `/room list` | List every room you own |
+| `/room add <room> <token>` | Add an account to a room - it gets the next free slot |
+| `/room remove <room> <slot>` | Remove an account - the remaining slots are closed up |
+| `/room delete <room>` | Delete a room with every account in it |
+| `/room renew <room>` | Reset the 30 day timer of a room |
+| `/room webhook <room> <url>` | Post every change of a room to a Discord webhook |
+| `/room webhook-clear <room>` | Stop posting to the webhook |
+
+The slots of a room are a continuous sequence: `1, 2, 3, ...`. When you
+remove the account in slot 2, the account that was in slot 3 moves to slot 2
+and the next account you add gets slot 3. There is never a hole in the
+sequence.
+
+A webhook posts the **room name**, the **account** and the **event**. The
+token itself is never sent - a webhook usually points at a channel that
+other people can read.
 
 ### `/account`
 
@@ -107,7 +142,7 @@ registered globally (Discord can take up to an hour to propagate).
 | --- | --- |
 | `/account link` | Official OAuth2 authorisation (only the `identify` scope) |
 | `/account status` | Whether an account is linked and still valid |
-| `/account unlink` | Delete the linked account and its credentials |
+| `/account unlink` | Delete the link, the rooms and every trace of your data |
 | `/account privacy` | What is stored, who can see it, how to remove it |
 
 ### `/task`
@@ -152,6 +187,7 @@ registered globally (Discord can take up to an hour to propagate).
 | `/admin restore` | Restore a backup (autocomplete over the backup files) |
 | `/admin maintenance` | Toggle maintenance mode (confirmation button) |
 | `/admin config` | Read and write configuration values |
+| `/admin purge <user>` | Delete every piece of data of a user |
 
 ### `/admin whitelist` (owner or admin role)
 
@@ -162,6 +198,7 @@ registered globally (Discord can take up to an hour to propagate).
 | `/admin whitelist remove guild\|user <id>` | Remove it |
 | `/admin whitelist enable` / `disable` | Turn the restriction on or off (off by default) |
 | `/admin whitelist sync` | Add every server the bot is in |
+
 
 ---
 
@@ -174,7 +211,10 @@ Discord slash command
 Command handler  (bot/commands/*)
         |
         v
-Quest / Reward / Account / Progress service  (bot/services/*)
+Scope  (bot/services/scope.ts)   <- what this user may reach
+        |
+        v
+Quest / Room / Reward / Account / Progress service  (bot/services/*)
         |
         v
 Legacy quest engine  (src/quest.ts + src/interface.ts)   <- unchanged parsing
@@ -192,12 +232,26 @@ Embed response (bot/ui/*)
 | Folder | Content |
 | --- | --- |
 | `bot/commands/` | slash command definitions and the component router |
-| `bot/services/` | quest, account, progress, reward, notification, admin logic |
-| `bot/integrations/` | OAuth2, Discord REST for linked accounts, quest providers |
+| `bot/services/` | quest, room, account, progress, reward, notification, admin logic |
+| `bot/integrations/` | OAuth2, webhooks, Discord REST for linked accounts, quest providers |
 | `bot/database/` | connection, migrations, repositories |
 | `bot/ui/` | embeds, components, theme |
 | `bot/utils/` | config, logger, errors, crypto |
 | `src/` | the preserved legacy quest engine (models + parser) |
+
+### The scope
+
+Every command runs inside a scope that is built from the Discord user id
+(`bot/services/scope.ts`). The scope decides:
+
+- which accounts a command may use - the accounts of the rooms of that user,
+  and for the owner additionally the operator level accounts,
+- which rows a query may touch,
+- which settings the user may change - the selected account is stored per
+  user, so one user can never change the selection of another one.
+
+The scope is passed explicitly down to the services. There is no global
+"current account" that a command could fall back to.
 
 ---
 
@@ -207,9 +261,9 @@ Embed response (bot/ui/*)
 | --- | --- | --- | --- |
 | `DISCORD_BOT_TOKEN` | yes | - | bot token |
 | `DISCORD_CLIENT_ID` | yes | - | application id |
+| `ENCRYPTION_KEY` | yes | - | key for the token vault - the bot refuses to start without it |
 | `DISCORD_CLIENT_SECRET` | no | - | needed for `/account link` |
 | `DISCORD_REDIRECT_URI` | no | - | OAuth2 redirect target |
-| `ENCRYPTION_KEY` | no | client secret | key for the token vault |
 | `OWNER_ID` | no | - | full admin access |
 | `ADMIN_ROLE_ID` | no | - | role that may use `/admin` |
 | `GUILD_ID` | no | - | guild scoped command registration |
@@ -219,15 +273,19 @@ Embed response (bot/ui/*)
 | `NOTIFICATION_INTERVAL_MINUTES` | no | `15` | notification polling interval |
 | `PORT` | no | `3000` | HTTP port for `/health` and the OAuth2 callback |
 | `NOTIFY_CHANNEL_ID` | no | - | channel that receives the status messages |
-| `USER_TOKEN` | no | - | a Discord **user** token - gives access to the live quests and the automation |
+| `USER_TOKEN` | no | - | a Discord **user** token for the operator - gives access to the live quests and the automation |
 
 > `GUILD_ID` accepts several ids (comma separated). Guild scoped commands appear
 > instantly, global ones can take up to an hour to propagate.
 >
-> `USER_TOKEN` enables `/quest auto` and `/quest all`. It is an optional,
-> operator managed setting - `/token add <label> <token> user` stores the same
-> kind of token encrypted in the database and works without any environment
-> variable.
+> `ENCRYPTION_KEY` is required. It encrypts every stored token. If it is
+> missing the bot refuses to start - there is no built-in fallback key,
+> because a published default would let everybody decrypt the database.
+> The same key has to be used on every instance, so a token that was stored on
+> one instance stays readable on the others.
+>
+> `USER_TOKEN` enables `/quest auto` and `/quest all` for the **operator**.
+> Regular users add their own accounts with `/room add`.
 
 ---
 
@@ -255,8 +313,9 @@ Embed response (bot/ui/*)
 
 The quest endpoints are user-session endpoints, so the bot needs a user token:
 
-* either `USER_TOKEN=<token>` in the environment, or
-* `/token add main <token> user` from Discord (stored encrypted).
+* every user adds their own with `/room add <room> <token>`, or
+* the operator sets `USER_TOKEN=<token>` in the environment, or
+* the operator uses `/token add main <token> user` (stored encrypted).
 
 The same `ENCRYPTION_KEY` has to be used on every instance, so a token
 registered on one instance stays readable on the others.
@@ -282,6 +341,9 @@ video quest that needs five minutes is finished after five minutes and not
 after five minutes per account. The selection made with `/quest switch`
 survives a restart.
 
+Every user only ever sees and uses **their own** accounts. The account
+labels of one user never appear in the command list of another one.
+
 Docker works as well:
 
 ```bash
@@ -291,6 +353,7 @@ docker run -d --name quest-completer --restart unless-stopped \
   -v quest-data:/app/data \
   -e DISCORD_BOT_TOKEN=... \
   -e DISCORD_CLIENT_ID=... \
+  -e ENCRYPTION_KEY=... \
   quest-completer
 ```
 
@@ -307,7 +370,8 @@ npm run build      # compile to dist/
 
 The test suite covers the legacy parser (both `task_config` formats), the
 database migrations, the repositories, the command definitions, the services,
-the token vault and the UI helpers.
+the rooms (including the slot re-sequencing), the token vault, the scoping and
+the UI helpers.
 
 ---
 
@@ -323,8 +387,15 @@ the token vault and the UI helpers.
   `/quest refresh` to update the stored copy.
 * A user token can only drive one session at a time - a second session with the
   same token invalidates the first one.
-* Using a user token violates Discord's terms of service. Use it at your own
-  risk.
+* **Using a user token violates Discord's terms of service.** `/room add`
+  asks for one, so that the bot can read the live quests of that account and
+  run the automation for it. Use it at your own risk - a user token that
+  automates a Discord account can get that account disabled. The token is
+  encrypted at rest, is never shown in full and is never sent to a webhook.
+* A room is reset after 30 days. The accounts in it are deleted with it.
+* The whitelist is **off** by default, so anybody can use the bot. Turn it on
+  with `/admin whitelist enable` if you want to limit it to certain servers
+  or users.
 
 ---
 

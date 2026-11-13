@@ -13,16 +13,14 @@ export function startHttpServer(port: number, services: Services): Server {
 		const url = new URL(request.url ?? '/', `http://${host}`);
 
 		if (url.pathname === '/health' || url.pathname === '/') {
-			const stats = services.adminService.stats();
-
+			// The endpoint is public, so it only reports that the process is
+			// alive. Counts of users or accounts would leak how many people
+			// use the bot.
 			response.writeHead(200, { 'Content-Type': 'application/json' });
 			response.end(
 				JSON.stringify({
 					status: 'ok',
-					uptime: stats.uptimeSeconds,
-					users: stats.users,
-					quests: stats.quests,
-					linkedAccounts: stats.links,
+					uptime: Math.round(process.uptime()),
 				}),
 			);
 			return;

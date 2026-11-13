@@ -51,9 +51,9 @@ export const rewardCommand = group(
 			description: 'Show the reward and its requirements for a quest.',
 			build: questOption,
 			run: async (context: CommandContext) => {
-				const { interaction, services, userId } = context;
+				const { interaction, services, scope } = context;
 				const questId = interaction.options.getString('quest', true);
-				const quest = await services.questService.get(questId, userId);
+				const quest = await services.questService.get(questId, scope);
 				const status = services.rewardService.buildStatus(quest);
 
 				await interaction.reply({
@@ -101,12 +101,12 @@ export const rewardCommand = group(
 			description: 'Show whether a reward can be claimed and if it was claimed.',
 			build: questOption,
 			run: async (context: CommandContext) => {
-				const { interaction, services, userId } = context;
+				const { interaction, services, scope } = context;
 				const questId = interaction.options.getString('quest', true);
-				const quest = await services.questService.get(questId, userId);
+				const quest = await services.questService.get(questId, scope);
 				const status = await services.rewardService.status(
 					questId,
-					userId,
+					scope.userId,
 					quest,
 				);
 
@@ -138,9 +138,9 @@ export const rewardCommand = group(
 			description: 'Start the official claim flow (Discord may ask for a captcha).',
 			build: questOption,
 			run: async (context: CommandContext) => {
-				const { interaction, services, userId } = context;
+				const { interaction, services, scope } = context;
 				const questId = interaction.options.getString('quest', true);
-				const quest = await services.questService.get(questId, userId);
+				const quest = await services.questService.get(questId, scope);
 				const status = services.rewardService.buildStatus(quest);
 
 				services.rewardService.requireClaimable(status);
@@ -188,13 +188,13 @@ export const rewardCommand = group(
 			description: 'Fetch a claimed reward code through the Discord API.',
 			build: questOption,
 			run: async (context: CommandContext) => {
-				const { interaction, services, userId } = context;
+				const { interaction, services, scope } = context;
 				const questId = interaction.options.getString('quest', true);
 
 				try {
 					const result = await services.rewardService.code(
 						questId,
-						userId,
+						scope.userId,
 					);
 
 					await interaction.reply({

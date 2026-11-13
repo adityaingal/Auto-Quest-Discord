@@ -2,6 +2,7 @@ import { QuestPayload, UserSession } from '../integrations/userSession';
 import { QuestTaskType } from '../models/enums';
 import { Logger } from '../utils/logger';
 import { ValidationError } from '../utils/errors';
+import { AccountScope, OPERATOR_SCOPE } from './scope';
 
 export type AutoTaskType =
 	| 'WATCH_VIDEO'
@@ -70,10 +71,12 @@ export type QueueJob = {
 /**
  * The account the commands work with when nothing else is selected. The
  * implementation is optional - without it the bot simply uses every account.
+ *
+ * The selection belongs to a scope, so every user picks their own account.
  */
 export type AutoSettings = {
-	readDefaultAccount(): string | null;
-	writeDefaultAccount(label: string | null): void;
+	readDefaultAccount(scope: AccountScope): string | null;
+	writeDefaultAccount(scope: AccountScope, label: string | null): void;
 };
 
 export type RunAllOptions = {
@@ -114,102 +117,116 @@ function sleep(ms: number): Promise<void> {
 /**
  * Quest automation against one or more user sessions (optional).
  *
- * The sessions are resolved on every call, so a token that is registered with
- * "/token add" is usable right away - no restart needed.
+ * The sessions are resolved on every call and belong to a scope, so a token
+ * that was just added to a room is usable right away - no restart needed -
+ * and one user never reaches the accounts of another one.
  *
  * Every account can be worked on at the same time: the quests of all accounts
  * are started together, so a video quest that needs five minutes is finished
  * after five minutes and not after five minutes per account.
  */
 export class AutoService {
-	private stopRequested = false;
-	private running = false;
+	private readonly stopRequested = new Set<string>();
+	private readonly running = new Set<string>();
 
 	constructor(
-		private readonly sessionsProvider: () => SessionEntry[],
+		private readonly sessionsProvider: (
+			scope: AccountScope,
+		) => SessionEntry[],
 		private readonly settings?: AutoSettings,
 	) {}
 
-	/** Asks a running queue to stop after the current quest. */
-	requestStop(): void {
-		this.stopRequested = true;
+	/** The key the running state of a scope is stored under. */
+	private static key(scope: AccountScope): string {
+		return scope.userId;
 	}
 
-	get isStopping(): boolean {
-		return this.stopRequested;
+	/** Asks a running queue to stop after the current quest. */
+	requestStop(scope: AccountScope = OPERATOR_SCOPE): void {
+		this.stopRequested.add(AutoService.key(scope));
+	}
+
+	isStopping(scope: AccountScope = OPERATOR_SCOPE): boolean {
+		return this.stopRequested.has(AutoService.key(scope));
 	}
 
 	/** True while a queue is running. */
-	get isRunning(): boolean {
-		return this.running;
+	isRunning(scope: AccountScope = OPERATOR_SCOPE): boolean {
+		return this.running.has(AutoService.key(scope));
 	}
 
-	private resolveSessions(): SessionEntry[] {
+	private resolveSessions(scope: AccountScope): SessionEntry[] {
 		try {
-			return this.sessionsProvider() ?? [];
+			return this.sessionsProvider(scope) ?? [];
 		} catch {
 			return [];
 		}
 	}
 
-	private get sessions(): SessionEntry[] {
-		return this.resolveSessions();
+	private sessionsOf(scope: AccountScope): SessionEntry[] {
+		return this.resolveSessions(scope);
 	}
 
-	get enabled(): boolean {
-		return this.resolveSessions().length > 0;
+	enabled(scope: AccountScope = OPERATOR_SCOPE): boolean {
+		return this.resolveSessions(scope).length > 0;
 	}
 
-	get accounts(): string[] {
-		return this.resolveSessions().map((entry) => entry.label);
+	accounts(scope: AccountScope = OPERATOR_SCOPE): string[] {
+		return this.resolveSessions(scope).map((entry) => entry.label);
 	}
 
 	/**
 	 * The account the commands use when no account is named. Null means "every
 	 * account" - they then all run at the same time.
 	 */
-	get defaultAccount(): string | null {
-		const stored = this.settings?.readDefaultAccount() ?? null;
+	defaultAccount(scope: AccountScope = OPERATOR_SCOPE): string | null {
+		const stored = this.settings?.readDefaultAccount(scope) ?? null;
 		if (!stored) return null;
 
 		// A removed token must not stay selected.
-		return this.accounts.includes(stored) ? stored : null;
+		return this.accounts(scope).includes(stored) ? stored : null;
 	}
 
 	/**
 	 * Selects the account the commands work with. `null` clears the
 	 * selection, then every account is used at the same time.
 	 */
-	setDefaultAccount(label: string | null): void {
+	setDefaultAccount(
+		scope: AccountScope,
+		label: string | null,
+	): void {
 		if (label === null) {
-			this.settings?.writeDefaultAccount(null);
+			this.settings?.writeDefaultAccount(scope, null);
 			return;
 		}
 
 		const clean = label.trim();
 		if (!clean) {
-			this.settings?.writeDefaultAccount(null);
+			this.settings?.writeDefaultAccount(scope, null);
 			return;
 		}
 
-		if (!this.accounts.includes(clean)) {
+		if (!this.accounts(scope).includes(clean)) {
 			throw new ValidationError(
 				`There is no account called "${clean}". Use "/quest sessions" to see the available accounts.`,
 			);
 		}
 
-		this.settings?.writeDefaultAccount(clean);
+		this.settings?.writeDefaultAccount(scope, clean);
 	}
 
 	/**
 	 * The account a command should work with: the named one, otherwise the
 	 * default account, otherwise null (every account).
 	 */
-	resolveAccount(explicit?: string | null): string | null {
+	resolveAccount(
+		scope: AccountScope,
+		explicit?: string | null,
+	): string | null {
 		const wanted = explicit?.trim();
-		if (!wanted) return this.defaultAccount;
+		if (!wanted) return this.defaultAccount(scope);
 
-		if (!this.accounts.includes(wanted)) {
+		if (!this.accounts(scope).includes(wanted)) {
 			throw new ValidationError(
 				`There is no account called "${wanted}". Use "/quest sessions" to see the available accounts.`,
 			);
@@ -223,9 +240,11 @@ export class AutoService {
 	 * account name, whether the token still works and how many quests the
 	 * account has.
 	 */
-	async describeSessions(): Promise<AccountSummary[]> {
+	async describeSessions(
+		scope: AccountScope = OPERATOR_SCOPE,
+	): Promise<AccountSummary[]> {
 		return Promise.all(
-			this.sessions.map(async (entry) => {
+			this.sessionsOf(scope).map(async (entry) => {
 				const [identity, quests] = await Promise.all([
 					entry.session.whoami(),
 					entry.session.listQuests(),
@@ -315,14 +334,17 @@ export class AutoService {
 
 	/**
 	 * The live quests of one account. Without a named account the first
-	 * working session is used.
+	 * working session of the scope is used.
 	 */
-	async listLiveQuests(account?: string | null): Promise<{
+	async listLiveQuests(
+		scope: AccountScope,
+		account?: string | null,
+	): Promise<{
 		quests: QuestPayload[];
 		account: string;
 	} | null> {
 		const wanted = account?.trim();
-		const entries = this.sessions;
+		const entries = this.sessionsOf(scope);
 
 		if (wanted) {
 			const entry = entries.find(
@@ -371,11 +393,13 @@ export class AutoService {
 	 * The live quests of every account - read in parallel so all accounts
 	 * answer at the same time.
 	 */
-	async listAllLiveQuests(): Promise<
+	async listAllLiveQuests(
+		scope: AccountScope = OPERATOR_SCOPE,
+	): Promise<
 		{ account: string; quests: QuestPayload[]; error: string | null }[]
 	> {
 		return Promise.all(
-			this.sessions.map(async (entry) => {
+			this.sessionsOf(scope).map(async (entry) => {
 				const response = await entry.session.listQuests();
 
 				if (!response.ok || !response.data) {
@@ -405,8 +429,11 @@ export class AutoService {
 	 * The queue the automation is going to run: every runnable quest of every
 	 * selected account.
 	 */
-	async planQueue(options: RunAllOptions = {}): Promise<QueueJob[]> {
-		const entries = this.targetSessions(options.account);
+	async planQueue(
+		scope: AccountScope,
+		options: RunAllOptions = {},
+	): Promise<QueueJob[]> {
+		const entries = this.targetSessions(scope, options.account);
 		if (entries.length === 0) return [];
 
 		const lists = await Promise.all(
@@ -455,13 +482,15 @@ export class AutoService {
 	 * time), play quests are advanced with a heartbeat every minute.
 	 */
 	async run(
+		scope: AccountScope,
 		quest: QuestPayload,
 		account?: string | null,
 		onProgress?: ProgressCallback,
 	): Promise<AutoRunResult> {
-		const session = this.sessionFor(account);
+		const session = this.sessionFor(scope, account);
 
 		return this.runWithSession(
+			scope,
 			quest,
 			session,
 			account ?? null,
@@ -469,8 +498,11 @@ export class AutoService {
 		);
 	}
 
-	private sessionFor(account?: string | null): UserSession | null {
-		const sessions = this.sessions;
+	private sessionFor(
+		scope: AccountScope,
+		account?: string | null,
+	): UserSession | null {
+		const sessions = this.sessionsOf(scope);
 		if (sessions.length === 0) return null;
 
 		if (account) {
@@ -487,8 +519,11 @@ export class AutoService {
 	 * The accounts the queue works on: the named one, otherwise every
 	 * configured account.
 	 */
-	private targetSessions(account?: string | null): SessionEntry[] {
-		const sessions = this.sessions;
+	private targetSessions(
+		scope: AccountScope,
+		account?: string | null,
+	): SessionEntry[] {
+		const sessions = this.sessionsOf(scope);
 		if (!account) return sessions;
 
 		const entry = sessions.find((candidate) => candidate.label === account);
@@ -496,6 +531,7 @@ export class AutoService {
 	}
 
 	private async runWithSession(
+		scope: AccountScope,
 		quest: QuestPayload,
 		session: UserSession | null,
 		account: string | null,
@@ -550,7 +586,7 @@ export class AutoService {
 				taskType,
 				message: account
 					? `There is no usable session for the account "${account}".`
-					: 'No user session is configured. Add one with `/token add` (type user) or set USER_TOKEN in the environment.',
+					: 'No user session is configured. Add one with `/room add` (or `/token add` for the operator).',
 			};
 		}
 
@@ -587,6 +623,7 @@ export class AutoService {
 
 		if (VIDEO_TASKS.includes(taskType)) {
 			return this.runVideoQuest(
+				scope,
 				quest,
 				taskType,
 				target,
@@ -597,7 +634,13 @@ export class AutoService {
 		}
 
 		if (taskType === 'PLAY_ON_DESKTOP') {
-			return this.runPlayQuest(quest, target, session, report);
+			return this.runPlayQuest(
+				scope,
+				quest,
+				target,
+				session,
+				report,
+			);
 		}
 
 		return {
@@ -610,6 +653,7 @@ export class AutoService {
 	}
 
 	private async runVideoQuest(
+		scope: AccountScope,
 		quest: QuestPayload,
 		taskType: AutoTaskType,
 		target: number,
@@ -621,7 +665,7 @@ export class AutoService {
 		let completed = Boolean(quest.user_status?.completed_at);
 
 		while (secondsDone < target) {
-			if (this.stopRequested) {
+			if (this.isStopping(scope)) {
 				return {
 					finished: false,
 					progress: secondsDone,
@@ -714,6 +758,7 @@ export class AutoService {
 	}
 
 	private async runPlayQuest(
+		scope: AccountScope,
 		quest: QuestPayload,
 		target: number,
 		session: UserSession,
@@ -722,7 +767,7 @@ export class AutoService {
 		const applicationId = quest.config.application.id;
 
 		for (;;) {
-			if (this.stopRequested) {
+			if (this.isStopping(scope)) {
 				return {
 					finished: false,
 					progress: 0,
@@ -783,6 +828,7 @@ export class AutoService {
 	 * and not as long as the sum of all of them.
 	 */
 	async runAll(
+		scope: AccountScope,
 		onProgress?: (
 			quest: QuestPayload,
 			progress: AutoProgress,
@@ -792,17 +838,19 @@ export class AutoService {
 		) => void,
 		options: RunAllOptions = {},
 	): Promise<AutoRunSummary> {
-		if (this.running) {
+		const key = AutoService.key(scope);
+
+		if (this.running.has(key)) {
 			throw new ValidationError(
 				'A quest queue is already running - stop it first.',
 			);
 		}
 
-		this.running = true;
-		this.stopRequested = false;
+		this.running.add(key);
+		this.stopRequested.delete(key);
 
 		try {
-			const jobs = options.plan ?? (await this.planQueue(options));
+			const jobs = options.plan ?? (await this.planQueue(scope, options));
 
 			const summary: AutoRunSummary = {
 				completed: 0,
@@ -811,7 +859,7 @@ export class AutoService {
 				results: [],
 				accounts: jobs.length
 					? [...new Set(jobs.map((job) => job.account))]
-					: this.targetSessions(options.account).map(
+					: this.targetSessions(scope, options.account).map(
 							(entry) => entry.label,
 						),
 			};
@@ -819,13 +867,17 @@ export class AutoService {
 			if (jobs.length === 0) return summary;
 
 			const sessions = new Map(
-				this.sessions.map((entry) => [entry.label, entry.session]),
+				this.sessionsOf(scope).map((entry) => [
+					entry.label,
+					entry.session,
+				]),
 			);
 
 			// Every quest of every account starts now - they run in parallel.
 			const results = await Promise.all(
 				jobs.map(async (job, index) => {
 					const result = await this.runWithSession(
+						scope,
 						job.quest,
 						sessions.get(job.account) ?? null,
 						job.account,
@@ -852,13 +904,13 @@ export class AutoService {
 				summary.results.push(result);
 
 				if (result.finished) summary.completed++;
-				else if (this.stopRequested) summary.skipped++;
+				else if (this.isStopping(scope)) summary.skipped++;
 				else summary.failed++;
 			}
 
 			return summary;
 		} finally {
-			this.running = false;
+			this.running.delete(key);
 		}
 	}
 }

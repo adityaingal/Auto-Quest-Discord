@@ -11,8 +11,12 @@ import { RewardService } from '../bot/services/rewardService';
 import { DiscordOAuth2 } from '../bot/integrations/oauth2';
 import { TokenVault } from '../bot/utils/crypto';
 import { NotFoundError, IntegrationUnavailableError } from '../bot/utils/errors';
+import { AccountScope } from '../bot/services/scope';
 
 const CATALOG = 'quest.json';
+
+/** The scope the tests work in. */
+const SCOPE: AccountScope = { userId: 'user-1', isOperator: false };
 
 function services() {
 	const db = new Database(':memory:');
@@ -64,12 +68,13 @@ function services() {
 	};
 }
 
-test('all six command groups are registered', () => {
+test('all seven command groups are registered', () => {
 	assert.deepEqual(commandNames.sort(), [
 		'account',
 		'admin',
 		'quest',
 		'reward',
+		'room',
 		'task',
 		'token',
 	]);
@@ -103,8 +108,20 @@ test('every command group exposes the documented subcommands', () => {
 			'restore',
 			'maintenance',
 			'config',
+			'purge',
 		],
 		token: ['list', 'add', 'import', 'remove', 'check'],
+		room: [
+			'create',
+			'search',
+			'list',
+			'add',
+			'remove',
+			'delete',
+			'renew',
+			'webhook',
+			'webhook-clear',
+		],
 	};
 
 	for (const command of commands) {
@@ -177,7 +194,7 @@ test('a live provider that is unavailable is reported as such', async () => {
 
 test('the quest service falls back to the catalogue', async () => {
 	const { questService, db } = services();
-	const result = await questService.list('user-1');
+	const result = await questService.list(SCOPE);
 
 	assert.ok(result.quests.length > 0);
 	assert.equal(result.source, 'catalogue');
@@ -187,7 +204,7 @@ test('the quest service falls back to the catalogue', async () => {
 
 test('progress is recorded and the percentage is calculated', async () => {
 	const { questService, progressService, db } = services();
-	const { quests } = await questService.list('user-1');
+	const { quests } = await questService.list(SCOPE);
 	const quest = quests[0];
 
 	quest.progress = {
@@ -213,7 +230,7 @@ test('progress is recorded and the percentage is calculated', async () => {
 
 test('reward status reflects the quest state', async () => {
 	const { questService, rewardService, db } = services();
-	const { quests } = await questService.list('user-1');
+	const { quests } = await questService.list(SCOPE);
 	const status = rewardService.buildStatus(quests[0]);
 
 	assert.equal(status.eligible, false);
@@ -277,6 +294,7 @@ test('the privacy notice explains the data that is stored', async () => {
 	const notice = accountService.privacyNotice().join('\n');
 
 	assert.ok(notice.includes('encrypted'));
-	assert.ok(notice.includes('Raw user tokens'));
+	assert.ok(notice.includes('/account unlink'));
+	assert.ok(notice.includes('/admin purge'));
 	db.close();
 });

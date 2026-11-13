@@ -5,6 +5,8 @@ import { ProgressService } from './progressService';
 import { QuestEligibility } from '../models/enums';
 import { Logger } from '../utils/logger';
 import { COLORS, EMOJI } from '../ui/theme';
+import { AccountScope } from './scope';
+import { RoomService } from './roomService';
 
 export type NotificationEvent =
 	| 'new-quest'
@@ -17,17 +19,24 @@ export type NotificationEvent =
  * Watches the quest state of linked accounts and pushes notifications to
  * Discord. Polling is rate limit friendly: every user has its own interval
  * and the default is 15 minutes.
+ *
+ * The check runs in the scope of the user, so only their own accounts are
+ * read - the accounts of the operator are never used as a fallback.
  */
 export class NotificationService {
 	private timer: NodeJS.Timeout | null = null;
 	private readonly lastCheck = new Map<string, number>();
+	private lastSweep = 0;
 
 	constructor(
 		private readonly client: Client,
 		private readonly repositories: Repositories,
 		private readonly questService: QuestService,
 		private readonly progressService: ProgressService,
+		private readonly scopeFor: (userId: string) => AccountScope,
+		private readonly roomService?: RoomService,
 	) {}
+
 
 	start(intervalMinutes: number): void {
 		if (this.timer) return;
@@ -48,6 +57,10 @@ export class NotificationService {
 	}
 
 	async tick(): Promise<void> {
+		// The rooms are reset automatically after 30 days. The sweep runs on
+		// every tick, but it only does work when a room is actually due.
+		await this.sweepRooms();
+
 		const settings = this.repositories.listNotificationUsers();
 
 		for (const entry of settings) {
@@ -76,6 +89,31 @@ export class NotificationService {
 		}
 	}
 
+	/**
+	 * Resets the rooms that reached their 30 day limit and tells their
+	 * owners about it.
+	 */
+	private async sweepRooms(): Promise<void> {
+		if (!this.roomService) return;
+
+		// The sweep runs at most once an hour, no matter how often the
+		// notification tick runs.
+		const now = Date.now();
+		if (now - this.lastSweep < 60 * 60_000) return;
+		this.lastSweep = now;
+
+		try {
+			await this.roomService.runExpirySweep(async (userId, message) => {
+				const user = await this.client.users.fetch(userId);
+				await user.send(message);
+			});
+		} catch (error) {
+			Logger.warn(
+				`The room sweep failed: ${(error as Error).message}`,
+			);
+		}
+	}
+
 	async checkUser(
 		discordUserId: string,
 		preferences: {
@@ -86,7 +124,8 @@ export class NotificationService {
 			expiry: boolean;
 		},
 	): Promise<void> {
-		const { quests } = await this.questService.list(discordUserId);
+		const scope = this.scopeFor(discordUserId);
+		const { quests } = await this.questService.list(scope);
 		const known = new Set(
 			this.repositories
 				.listProgress(discordUserId)

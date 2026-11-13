@@ -48,14 +48,17 @@ test('the health endpoint reports the bot status', async () => {
 	const body = (await response.json()) as {
 		status: string;
 		uptime: number;
-		users: number;
-		quests: number;
+		users?: number;
+		quests?: number;
 	};
 
 	assert.equal(body.status, 'ok');
-	assert.equal(body.uptime, 42);
-	assert.equal(body.users, 1);
-	assert.equal(body.quests, 2);
+	assert.equal(typeof body.uptime, 'number');
+
+	// The endpoint is public, so it must not report how many people use the
+	// bot.
+	assert.equal(body.users, undefined);
+	assert.equal(body.quests, undefined);
 
 	server.close();
 	db.close();

@@ -142,7 +142,22 @@ test('the config refuses to start without a bot token', () => {
 		() =>
 			loadConfig({
 				DISCORD_CLIENT_ID: '1',
+				ENCRYPTION_KEY: 'key',
 				// do not read the local .env file
+				DOTENV_PATH: '.env.does-not-exist',
+			} as NodeJS.ProcessEnv),
+		ConfigError,
+	);
+});
+
+test('the config refuses to start without an encryption key', () => {
+	// Without a key every stored token would be encrypted with a published
+	// default, so the bot must not start at all.
+	assert.throws(
+		() =>
+			loadConfig({
+				DISCORD_BOT_TOKEN: 'token',
+				DISCORD_CLIENT_ID: '1',
 				DOTENV_PATH: '.env.does-not-exist',
 			} as NodeJS.ProcessEnv),
 		ConfigError,
@@ -153,6 +168,7 @@ test('the config loads and defaults every optional value', () => {
 	const config = loadConfig({
 		DISCORD_BOT_TOKEN: 'token',
 		DISCORD_CLIENT_ID: '123',
+		ENCRYPTION_KEY: 'a-secret-that-is-long-enough',
 		DOTENV_PATH: '.env.does-not-exist',
 	} as NodeJS.ProcessEnv);
 
@@ -162,4 +178,22 @@ test('the config loads and defaults every optional value', () => {
 	assert.equal(config.notificationIntervalMinutes, 15);
 	assert.equal(config.databasePath, 'data/quest-bot.sqlite');
 	assert.equal(config.encryptionKey.length, 32);
+});
+
+test('the encryption key differs between two secrets', () => {
+	const first = loadConfig({
+		DISCORD_BOT_TOKEN: 'token',
+		DISCORD_CLIENT_ID: '1',
+		ENCRYPTION_KEY: 'first-secret',
+		DOTENV_PATH: '.env.does-not-exist',
+	} as NodeJS.ProcessEnv);
+
+	const second = loadConfig({
+		DISCORD_BOT_TOKEN: 'token',
+		DISCORD_CLIENT_ID: '1',
+		ENCRYPTION_KEY: 'second-secret',
+		DOTENV_PATH: '.env.does-not-exist',
+	} as NodeJS.ProcessEnv);
+
+	assert.notDeepEqual(first.encryptionKey, second.encryptionKey);
 });

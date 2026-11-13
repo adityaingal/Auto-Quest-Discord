@@ -1,11 +1,18 @@
 # Auto Quest Discord — Technical Protocol Spec
 
-> **Note (2.0 rewrite):** this document describes the Discord quest protocol.
-> The bot no longer *acts* as a user - the impersonation, the user-token flow
-> and the captcha automation described in §2, §3.4, §3.5 and §4 are **not
-> implemented any more** (see [`MIGRATION.md`](MIGRATION.md)). The bot only
-> *reads* quest configuration through the catalogue or a linked OAuth2 account
-> and reports what Discord returns.
+> **Note (2.1):** this document describes the Discord quest protocol.
+>
+> The bot **does** still act as a user for the quest endpoints. A user
+> registers their own account in a room (`/room add`) and the bot drives that
+> account with the desktop client fingerprint - see §2, §3.4, §3.5 and §4.
+> The captcha automation is **not** implemented: a captcha is always solved by
+> a human in the Discord client.
+>
+> The 2.0 report claimed the user-token flow had been removed. That was wrong.
+> See [`MIGRATION.md`](MIGRATION.md) for the correction.
+>
+> The accounts are **per user**: a token added by one user only ever drives
+> that user's account and is never reachable from another one.
 
 Complete description of how this program talks to Discord, so another bot (or an
 LLM) can reimplement it. Everything marked **[verified]** was confirmed against the
