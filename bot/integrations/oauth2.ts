@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { Logger } from '../utils/logger';
 
 export type OAuth2Config = {
 	clientId: string;
@@ -36,9 +37,10 @@ function describeExchangeFailure(
 			if (parsed.error === 'invalid_grant') {
 				return (
 					'Discord refused the authorization code (invalid_grant). ' +
-					'An authorization code can only be used once and expires after a few minutes - ' +
-					'this happens when the callback page is reloaded or the link is opened twice. ' +
-					'Run `/account link` again for a fresh code.'
+					'That happens when the code was already used, when it is older than a few minutes, ' +
+					'when the redirect URI differs from the one the code was issued for, ' +
+					'or when the code was issued for a different client id.\n' +
+					'Run `/account link` again, click the Authorise button once and do not reload the page afterwards.'
 				);
 			}
 
@@ -130,6 +132,13 @@ export class DiscordOAuth2 {
 
 		if (!response.ok) {
 			const details = (await response.text()).trim();
+
+			// The client id and the redirect uri are no secrets - they make a
+			// failed exchange much easier to diagnose.
+			Logger.warn(
+				`Token exchange failed (${response.status}) - client_id=${this.config.clientId} redirect_uri=${this.config.redirectUri}`,
+			);
+
 			throw new Error(
 				describeExchangeFailure(response.status, details),
 			);

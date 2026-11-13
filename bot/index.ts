@@ -198,6 +198,8 @@ async function main(): Promise<void> {
 		);
 	}
 
+	Logger.info(`OAuth2 client id: ${config.clientId}`);
+
 	await client.login(config.botToken);
 
 	// Additional bot tokens that were registered with /token add.
