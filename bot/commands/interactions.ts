@@ -144,14 +144,36 @@ export class InteractionRouter {
 		return services.scopeFor(interaction.user.id);
 	}
 
-	private isOwner(interaction: Interaction, services: Services): boolean {
-		return services.config.ownerIds.includes(interaction.user.id);
+	private panelPage(customId: string): { group?: string; page: number } {
+		const parts = customId.split(':');
+		if (parts.length >= 4) {
+			return { group: parts[2], page: Number(parts[3] ?? 0) };
+		}
+
+		return { page: Number(parts[2] ?? 0) };
 	}
 
-	private async denyOwner(interaction: Interaction): Promise<void> {
+	private panelCommandId(customId: string): { group?: string; id: string } {
+		const parts = customId.split(':');
+		if (parts.length >= 4) {
+			return { group: parts[2], id: parts.slice(3).join(':') };
+		}
+
+		return { id: parts.slice(2).join(':') };
+	}
+
+	private canManage(interaction: Interaction, services: Services): boolean {
+		return isAdmin({
+			services,
+			userId: interaction.user.id,
+			member: interaction.member,
+		});
+	}
+
+	private async denyManager(interaction: Interaction): Promise<void> {
 		if (interaction.isRepliable()) {
 			await interaction.reply({
-				content: 'This panel is for the bot owner only.',
+				content: 'This panel is for the bot owner and admins only.',
 				flags: MessageFlags.Ephemeral,
 			});
 		}
@@ -162,8 +184,8 @@ export class InteractionRouter {
 		services: Services,
 	): Promise<void> {
 		if (!interaction.isButton()) return;
-		if (!this.isOwner(interaction, services)) {
-			await this.denyOwner(interaction);
+		if (!this.canManage(interaction, services)) {
+			await this.denyManager(interaction);
 			return;
 		}
 
@@ -175,8 +197,8 @@ export class InteractionRouter {
 		services: Services,
 	): Promise<void> {
 		if (!interaction.isButton()) return;
-		if (!this.isOwner(interaction, services)) {
-			await this.denyOwner(interaction);
+		if (!this.canManage(interaction, services)) {
+			await this.denyManager(interaction);
 			return;
 		}
 
@@ -196,8 +218,8 @@ export class InteractionRouter {
 		services: Services,
 	): Promise<void> {
 		if (!interaction.isModalSubmit()) return;
-		if (!this.isOwner(interaction, services)) {
-			await this.denyOwner(interaction);
+		if (!this.canManage(interaction, services)) {
+			await this.denyManager(interaction);
 			return;
 		}
 
@@ -223,12 +245,13 @@ export class InteractionRouter {
 		services: Services,
 	): Promise<void> {
 		if (!interaction.isButton()) return;
-		if (!this.isOwner(interaction, services)) {
-			await this.denyOwner(interaction);
+		if (!this.canManage(interaction, services)) {
+			await this.denyManager(interaction);
 			return;
 		}
 
-		await interaction.update({ ...buildOwnerPanel(0) });
+		const group = interaction.customId.split(':')[2];
+		await interaction.update({ ...buildOwnerPanel(0, group) });
 	}
 
 	private async handleOwnerPanelNav(
@@ -236,14 +259,16 @@ export class InteractionRouter {
 		services: Services,
 	): Promise<void> {
 		if (!interaction.isButton()) return;
-		if (!this.isOwner(interaction, services)) {
-			await this.denyOwner(interaction);
+		if (!this.canManage(interaction, services)) {
+			await this.denyManager(interaction);
 			return;
 		}
 
-		const current = Number(interaction.customId.split(':')[2] ?? 0);
+		const { group, page: current } = this.panelPage(interaction.customId);
 		const next = interaction.customId.startsWith(OWNER_COMMAND_IDS.next);
-		await interaction.update({ ...buildOwnerPanel(next ? current + 1 : current - 1) });
+		await interaction.update({
+			...buildOwnerPanel(next ? current + 1 : current - 1, group),
+		});
 	}
 
 	private async handleOwnerPanelSelect(
@@ -251,13 +276,14 @@ export class InteractionRouter {
 		services: Services,
 	): Promise<void> {
 		if (!interaction.isStringSelectMenu()) return;
-		if (!this.isOwner(interaction, services)) {
-			await this.denyOwner(interaction);
+		if (!this.canManage(interaction, services)) {
+			await this.denyManager(interaction);
 			return;
 		}
 
 		const id = interaction.values[0];
-		const modal = ownerCommandModal(id);
+		const { group } = this.panelPage(interaction.customId);
+		const modal = ownerCommandModal(id, group);
 
 		if (!modal) {
 			await interaction.deferUpdate();
@@ -268,7 +294,7 @@ export class InteractionRouter {
 				[],
 			);
 			await interaction.editReply({
-				...buildOwnerPanelResult(id, result),
+				...buildOwnerPanelResult(id, result, group),
 			});
 			return;
 		}
@@ -281,13 +307,13 @@ export class InteractionRouter {
 		services: Services,
 	): Promise<void> {
 		if (!interaction.isButton()) return;
-		if (!this.isOwner(interaction, services)) {
-			await this.denyOwner(interaction);
+		if (!this.canManage(interaction, services)) {
+			await this.denyManager(interaction);
 			return;
 		}
 
-		const id = interaction.customId.split(':').slice(2).join(':');
-		const modal = ownerCommandModal(id);
+		const { group, id } = this.panelCommandId(interaction.customId);
+		const modal = ownerCommandModal(id, group);
 
 		if (!modal) {
 			await interaction.deferUpdate();
@@ -298,7 +324,7 @@ export class InteractionRouter {
 				[],
 			);
 			await interaction.editReply({
-				...buildOwnerPanelResult(id, result),
+				...buildOwnerPanelResult(id, result, group),
 			});
 			return;
 		}
@@ -311,12 +337,12 @@ export class InteractionRouter {
 		services: Services,
 	): Promise<void> {
 		if (!interaction.isModalSubmit()) return;
-		if (!this.isOwner(interaction, services)) {
-			await this.denyOwner(interaction);
+		if (!this.canManage(interaction, services)) {
+			await this.denyManager(interaction);
 			return;
 		}
 
-		const id = interaction.customId.split(':').slice(2).join(':');
+		const { group, id } = this.panelCommandId(interaction.customId);
 		const command = OWNER_COMMANDS.find((entry) => entry.id === id);
 		const args = (command?.fields ?? []).map((_, index) =>
 			interaction.fields.getTextInputValue(`field_${index}`).trim(),
@@ -333,7 +359,9 @@ export class InteractionRouter {
 			id,
 			args,
 		);
-		await interaction.editReply({ ...buildOwnerPanelResult(id, result) });
+		await interaction.editReply({
+			...buildOwnerPanelResult(id, result, group),
+		});
 	}
 
 	private async handleQuestSelect(
@@ -835,7 +863,7 @@ export class InteractionRouter {
 		if (!services.autoService.enabled(scope)) {
 			await interaction.reply({
 				content:
-					'You have no account yet. Add one with `!token add <label> <token> user` (owner prefix command).',
+					'You have no account yet. Add your own token with `/token add` and then run `/quest panel`.',
 				flags: MessageFlags.Ephemeral,
 			});
 			return;

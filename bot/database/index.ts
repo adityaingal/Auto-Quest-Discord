@@ -233,6 +233,46 @@ export const MIGRATIONS: Migration[] = [
 			ALTER TABLE rooms DROP COLUMN webhook_reveal;
 		`,
 	},
+	{
+		version: 8,
+		name: 'token_owners',
+		sql: `
+			ALTER TABLE tokens RENAME TO tokens_legacy;
+
+			CREATE TABLE tokens (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				label TEXT NOT NULL,
+				token TEXT NOT NULL,
+				type TEXT NOT NULL DEFAULT 'bot',
+				application_id TEXT,
+				bot_user_id TEXT,
+				bot_username TEXT,
+				account_id TEXT,
+				account_username TEXT,
+				owner_user_id TEXT,
+				status TEXT NOT NULL DEFAULT 'active',
+				created_at TEXT NOT NULL DEFAULT (datetime('now')),
+				last_checked_at TEXT,
+				UNIQUE (owner_user_id, label)
+			);
+
+			INSERT INTO tokens (
+				id, label, token, type, application_id, bot_user_id,
+				bot_username, account_id, account_username, status,
+				created_at, last_checked_at, owner_user_id
+			)
+			SELECT
+				id, label, token, type, application_id, bot_user_id,
+				bot_username, account_id, account_username, status,
+				created_at, last_checked_at, NULL
+			FROM tokens_legacy;
+
+			DROP TABLE tokens_legacy;
+
+			CREATE INDEX IF NOT EXISTS idx_tokens_owner
+				ON tokens (owner_user_id);
+		`,
+	},
 ];
 
 export class Database {

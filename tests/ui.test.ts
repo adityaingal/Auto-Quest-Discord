@@ -27,6 +27,7 @@ import {
 import { loadConfig } from '../bot/config';
 import { QuestEligibility } from '../bot/models/enums';
 import { InteractionRouter } from '../bot/commands/interactions';
+import { handlePrefixCommand } from '../bot/commands/prefix';
 
 function questStub() {
 	return {
@@ -237,6 +238,71 @@ test('the owner panel select menu opens a modal', async () => {
 		(shown as { toJSON(): { custom_id: string } }).toJSON().custom_id,
 		'owner:panel_modal:room.create',
 	);
+});
+
+test('the owner panel can be filtered to one command group', () => {
+	const payload = buildOwnerPanel(0, 'whitelist');
+	const row = payload.components[0].toJSON() as {
+		components: {
+			custom_id: string;
+			options: { value: string }[];
+		}[];
+	};
+	const menu = row.components[0];
+
+	assert.ok(menu.custom_id.includes(':whitelist:'));
+	assert.ok(menu.options.length > 0);
+	assert.ok(menu.options.every((option) => option.value.startsWith('whitelist.')));
+	assert.ok(String(payload.embeds[0].toJSON().title).includes('WHITELIST'));
+});
+
+test('an admin can use a filtered panel', async () => {
+	const router = new InteractionRouter({
+		config: { ownerIds: [] },
+		adminService: { isWhitelistedAdmin: () => true },
+	} as never);
+	let shown: { toJSON(): { custom_id: string } } | null = null;
+	const interaction = {
+		type: 3,
+		customId: 'owner:panel_select:whitelist:0',
+		user: { id: 'admin' },
+		values: ['whitelist.add'],
+		isStringSelectMenu: () => true,
+		isRepliable: () => true,
+		showModal: async (modal: { toJSON(): { custom_id: string } }) => {
+			shown = modal;
+		},
+		reply: async () => undefined,
+	} as never;
+
+	await router.handle(interaction);
+
+	assert.ok(shown, 'the modal was not shown');
+	assert.equal(
+		(shown as { toJSON(): { custom_id: string } }).toJSON().custom_id,
+		'owner:panel_modal:whitelist:whitelist.add',
+	);
+});
+
+test('!whitelist open opens the whitelist panel for admins', async () => {
+	let replied: { embeds?: unknown[] } | null = null;
+	const services = {
+		config: { prefix: '!', ownerIds: [] },
+		adminService: { isWhitelistedAdmin: () => true },
+		scopeFor: () => ({ userId: 'admin', isOperator: true }),
+	} as never;
+	const message = {
+		author: { id: 'admin', bot: false },
+		content: '!whitelist open',
+		reply: async (payload: { embeds?: unknown[] }) => {
+			replied = payload;
+		},
+	} as never;
+
+	await handlePrefixCommand(message, services);
+
+	assert.ok(replied, 'the panel was not sent');
+	assert.ok(JSON.stringify((replied as { embeds?: unknown[] }).embeds).includes('WHITELIST'));
 });
 
 test('the config refuses to start without a bot token', () => {

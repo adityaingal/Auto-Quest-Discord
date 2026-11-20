@@ -589,7 +589,7 @@ export class AutoService {
 				taskType,
 				message: account
 					? `There is no usable session for the account "${account}".`
-					: 'No user session is configured. Add one with `/token add <label> <token> user` (operator) or with `!room add` (owner prefix command).',
+					: 'No user session is configured. Add your own token with `/token add` (type **user**).',
 			};
 		}
 

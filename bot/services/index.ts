@@ -150,8 +150,28 @@ export function createServices(
 				});
 			}
 
-			// The operator level accounts are only reachable for the owner
-			// and the admins.
+			// Tokens added by a user are private to that user. Operators can
+			// also use the legacy owner-only tokens.
+			for (const entry of tokenService.resolveUserSessions(
+				scope.userId,
+				scope.isOperator,
+			)) {
+				if (
+					sessions.some(
+						(existing) => existing.label === entry.label,
+					)
+				) {
+					continue;
+				}
+
+				sessions.push({
+					label: entry.label,
+					session: sessionFor(entry.label, entry.token),
+				});
+			}
+
+			// The environment token is only reachable for the owner and the
+			// admins.
 			if (scope.isOperator) {
 				const envSession = UserSession.fromEnvironment();
 
@@ -159,21 +179,6 @@ export function createServices(
 					sessions.push({
 						label: 'USER_TOKEN',
 						session: envSession,
-					});
-				}
-
-				for (const entry of tokenService.resolveUserSessions()) {
-					if (
-						sessions.some(
-							(existing) => existing.label === entry.label,
-						)
-					) {
-						continue;
-					}
-
-					sessions.push({
-						label: entry.label,
-						session: sessionFor(entry.label, entry.token),
 					});
 				}
 			}

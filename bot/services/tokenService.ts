@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Repositories } from '../database/repositories';
+import { Repositories, TokenRow } from '../database/repositories';
 import { TokenVault } from '../utils/crypto';
 import { Logger } from '../utils/logger';
 import { NotFoundError, ValidationError } from '../utils/errors';
@@ -22,6 +22,8 @@ export type TokenRecord = {
 	masked: string;
 	/** Short fingerprint so two tokens can be told apart. */
 	fingerprint: string;
+	/** Null for owner/operator tokens added before per-user ownership. */
+	ownerUserId: string | null;
 };
 
 export type TokenCheck = {
@@ -196,6 +198,7 @@ export class TokenService {
 		label: string,
 		rawToken: string,
 		type: TokenType = 'bot',
+		ownerUserId: string | null = null,
 	): Promise<TokenRecord> {
 		const cleanLabel = label.trim();
 		if (!cleanLabel) {
@@ -221,13 +224,14 @@ export class TokenService {
 			bot_username: type === 'bot' ? check.username : null,
 			account_id: type === 'user' ? check.id : null,
 			account_username: type === 'user' ? check.username : null,
+			owner_user_id: ownerUserId,
 		});
 
 		Logger.info(
 			`${type} token "${cleanLabel}" registered for ${check.username}`,
 		);
 
-		return this.findByLabel(cleanLabel);
+		return this.findByLabel(cleanLabel, ownerUserId);
 	}
 
 	private async fetchApplicationId(
@@ -248,26 +252,21 @@ export class TokenService {
 		}
 	}
 
-	list(): TokenRecord[] {
-		return this.repositories
-			.listBotTokens()
-			.map((row) => this.toRecord(row));
+	/**
+	 * Without an owner id every token is returned (the owner view). With an
+	 * owner id only that user's tokens are returned; null means legacy
+	 * operator-only tokens.
+	 */
+	list(ownerUserId?: string | null): TokenRecord[] {
+		const rows =
+			ownerUserId === undefined
+				? this.repositories.listBotTokens()
+				: this.repositories.listBotTokensByOwner(ownerUserId);
+
+		return rows.map((row) => this.toRecord(row));
 	}
 
-	private toRecord(row: {
-		id: number;
-		label: string;
-		token: string;
-		type: 'bot' | 'user';
-		application_id: string | null;
-		bot_user_id: string | null;
-		bot_username: string | null;
-		account_id: string | null;
-		account_username: string | null;
-		status: string;
-		created_at: string;
-		last_checked_at: string | null;
-	}): TokenRecord {
+	private toRecord(row: TokenRow): TokenRecord {
 		let plain = '';
 		try {
 			plain = this.vault.decrypt(row.token);
@@ -289,13 +288,16 @@ export class TokenService {
 			lastCheckedAt: row.last_checked_at,
 			masked: TokenService.mask(plain),
 			fingerprint: TokenService.fingerprint(plain),
+			ownerUserId: row.owner_user_id,
 		};
 	}
 
-	findByLabel(label: string): TokenRecord {
-		const row = this.repositories
-			.listBotTokens()
-			.find((entry) => entry.label === label);
+	findByLabel(label: string, ownerUserId?: string | null): TokenRecord {
+		const rows =
+			ownerUserId === undefined
+				? this.repositories.listBotTokens()
+				: this.repositories.listBotTokensByOwner(ownerUserId);
+		const row = rows.find((entry) => entry.label === label);
 
 		if (!row) {
 			throw new NotFoundError(`No token with the label "${label}".`);
@@ -304,15 +306,24 @@ export class TokenService {
 		return this.toRecord(row);
 	}
 
-	remove(id: number): boolean {
-		const removed = this.repositories.deleteBotToken(id);
+	remove(id: number, ownerUserId?: string | null): boolean {
+		const removed =
+			ownerUserId === undefined
+				? this.repositories.deleteBotToken(id)
+				: this.repositories.deleteBotTokenByOwner(id, ownerUserId);
 		if (removed > 0) Logger.info(`Token #${id} removed`);
 
 		return removed > 0;
 	}
 
-	async revalidate(id: number): Promise<TokenCheck> {
-		const row = this.repositories.getBotToken(id);
+	async revalidate(
+		id: number,
+		ownerUserId?: string | null,
+	): Promise<TokenCheck> {
+		const row =
+			ownerUserId === undefined
+				? this.repositories.getBotToken(id)
+				: this.repositories.getBotTokenByOwner(id, ownerUserId);
 		if (!row) {
 			throw new NotFoundError(`No token with the id ${id}.`);
 		}
@@ -338,23 +349,46 @@ export class TokenService {
 	}
 
 	/**
-	 * All usable bot tokens - used to start additional bot instances.
+	 * Legacy bot tokens - used to start additional bot instances. User-owned
+	 * bot tokens are never started here.
 	 */
 	resolveUsable(): { label: string; token: string }[] {
-		return this.resolveByType('bot');
+		return this.resolveByType('bot', null);
 	}
 
 	/**
-	 * All usable user tokens - used for the quest automation.
+	 * User tokens for one discord user. Operators can also include the legacy
+	 * owner-only tokens.
 	 */
-	resolveUserSessions(): { label: string; token: string }[] {
-		return this.resolveByType('user');
+	resolveUserSessions(
+		ownerUserId: string,
+		includeLegacy = false,
+	): { label: string; token: string }[] {
+		const rows = [...this.repositories.listBotTokensByOwner(ownerUserId)];
+		if (includeLegacy) {
+			rows.push(...this.repositories.listBotTokensByOwner(null));
+		}
+
+		return this.toUsable(rows, 'user');
 	}
 
-	private resolveByType(type: TokenType): { label: string; token: string }[] {
+	private resolveByType(
+		type: TokenType,
+		ownerUserId: string | null,
+	): { label: string; token: string }[] {
+		return this.toUsable(
+			this.repositories.listBotTokensByOwner(ownerUserId),
+			type,
+		);
+	}
+
+	private toUsable(
+		rows: TokenRow[],
+		type: TokenType,
+	): { label: string; token: string }[] {
 		const usable: { label: string; token: string }[] = [];
 
-		for (const row of this.repositories.listBotTokens()) {
+		for (const row of rows) {
 			if (row.type !== type || row.status === 'invalid') continue;
 
 			try {

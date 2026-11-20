@@ -1,35 +1,17 @@
-import { MessageFlags, PermissionFlagsBits } from 'discord.js';
+import { MessageFlags } from 'discord.js';
 import { CommandContext, group } from './types';
 import { successEmbed } from '../ui/embeds';
 import { isAdmin } from './admin';
 import { PermissionError } from '../utils/errors';
-import { TokenService, TokenType } from '../services/tokenService';
+import { TokenType } from '../services/tokenService';
 
-function assertAdmin(context: CommandContext): void {
-	if (!isAdmin(context)) {
-		throw new PermissionError(
-			'Only the bot owner or the configured admin role can register tokens.',
-		);
-	}
-}
-
-/**
- * The only token command exposed as a slash command. All other token and
- * admin commands live behind the owner-only prefix commands (!token / !admin).
- *
- * This command is hidden from regular users twice:
- *   1. `setDefaultMemberPermissions(Administrator)` - regular members never
- *      see it in the slash command picker,
- *   2. `assertAdmin` runs at execution time, so it cannot be invoked by
- *      someone who crafts the interaction by hand.
- */
 const base = group(
 	'token',
-	'Owner only - register a token.',
+	'Register your own token for quest automation.',
 	[
 		{
 			name: 'add',
-			description: 'Register a bot token or a user token.',
+			description: 'Register your own user token, or a bot token as an admin.',
 			build: (sub) => {
 				sub.addStringOption((option) =>
 					option
@@ -40,48 +22,59 @@ const base = group(
 				sub.addStringOption((option) =>
 					option
 						.setName('token')
-						.setDescription('Bot token or user token')
+						.setDescription('Your Discord user token')
 						.setRequired(true),
 				);
 				sub.addStringOption((option) =>
 					option
 						.setName('type')
 						.setDescription(
-							'bot = an extra bot account, user = an account used for the quests',
+							'user = your account for quests, bot = an extra bot account (admin only)',
 						)
 						.setRequired(true)
 						.addChoices(
-							{ name: 'bot', value: 'bot' },
 							{ name: 'user', value: 'user' },
+							{ name: 'bot', value: 'bot' },
 						),
 				);
 			},
 			run: async (context: CommandContext) => {
-				assertAdmin(context);
-				const label = context.interaction.options.getString(
-					'label',
-					true,
-				);
-				const token = context.interaction.options.getString(
-					'token',
-					true,
-				);
-				const type = context.interaction.options.getString(
+				const { interaction, services, userId } = context;
+				const privileged = isAdmin({
+					services,
+					userId,
+					member: interaction.member,
+				});
+				const label = interaction.options.getString('label', true);
+				const token = interaction.options.getString('token', true);
+				const selectedType = interaction.options.getString(
 					'type',
 					true,
 				) as TokenType;
 
-				const record = await context.services.tokenService.add(
+				if (!privileged && selectedType === 'bot') {
+					throw new PermissionError(
+						'Only the bot owner or an admin can register bot tokens. Use type **user** to register your own token.',
+					);
+				}
+
+				const type = privileged ? selectedType : 'user';
+				const ownerUserId = privileged ? null : userId;
+				const record = await services.tokenService.add(
 					label,
 					token,
 					type,
+					ownerUserId,
 				);
 
-				await context.interaction.reply({
+				await interaction.reply({
 					embeds: [
 						successEmbed(
 							`Registered the **${record.type}** token \`${record.label}\` for ${record.botUsername ?? record.accountUsername ?? 'unknown'}.\n` +
-								`Stored encrypted and shown as \`${record.masked}\` (fingerprint \`${record.fingerprint}\`).`,
+								`Stored encrypted and shown as \`${record.masked}\` (fingerprint \`${record.fingerprint}\`).\n` +
+								(ownerUserId
+									? 'Only you can use this token.'
+									: 'Owner/operator token.'),
 						),
 					],
 					flags: MessageFlags.Ephemeral,
@@ -90,7 +83,5 @@ const base = group(
 		},
 	],
 );
-
-base.data.setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
 export const tokenCommand = base;

@@ -6,6 +6,7 @@ import {
 	Message,
 } from 'discord.js';
 import { Services } from '../services';
+import { isAdmin } from './admin';
 import { Logger } from '../utils/logger';
 import { AppError, toUserMessage } from '../utils/errors';
 import {
@@ -29,9 +30,9 @@ import {
  *
  * Public commands keep slash commands. The owner runs the maintenance and
  * admin commands with a prefix instead (for example `!admin stats`), which
- * keeps them out of the public command picker. Only the ids listed in
- * OWNER_ID are allowed to use these commands - everybody else is ignored
- * silently.
+ * keeps them out of the public command picker. Only the owner and the
+ * configured admins are allowed to use these commands - everybody else is
+ * ignored silently.
  */
 
 type PrefixHandler = (
@@ -43,10 +44,14 @@ type PrefixHandler = (
 
 const PREFIX_HELP = [
 	'`!help` - show this list',
-	'`!panel` - open the owner command panel (input modals + results)',
+	'`!panel [group]` - open the owner panel, optionally filtered',
 	'`!profile [user id]` - open the user profile panel (avatar + username)',
 	'',
-	'Rooms (owner only):',
+	'Panels (owner + admins):',
+	'`!room open` / `!token open` / `!admin open` - open that group panel',
+	'`!whitelist open` / `!quest open` - open that group panel',
+	'',
+	'Rooms (owner + admins):',
 	'`!room create <name> [description...]` - create a room',
 	'`!room search <name>` - find one of your rooms',
 	'`!room list` - list your rooms',
@@ -55,14 +60,14 @@ const PREFIX_HELP = [
 	'`!room delete <room>` - delete a room and its accounts',
 	'`!room renew <room>` - reset the 30 day timer',
 	'',
-	'Tokens (owner only):',
+	'Tokens (owner + admins):',
 	'`!token list [bot|user]` - list the stored tokens (masked)',
 	'`!token add <label> <token> <bot|user>` - register a token',
 	'`!token remove <id>` - delete a token',
 	'`!token import [label]` - register the USER_TOKEN environment variable',
 	'`!token check <id>` - validate a token against Discord',
 	'',
-	'Admin (owner only):',
+	'Admin (owner + admins):',
 	'`!admin setup` - show the setup status',
 	'`!admin stats` - usage statistics',
 	'`!admin users` - the known users',
@@ -74,7 +79,7 @@ const PREFIX_HELP = [
 	'`!admin config <key> <value>` - write a configuration value',
 	'`!admin purge <user>` - delete every piece of data of a user',
 	'',
-	'Whitelist (owner only):',
+	'Whitelist (owner + admins):',
 	'`!whitelist list` - show the whitelisted servers and users',
 	'`!whitelist add <guild|user> <id> [label] [member|admin]` - allow a server or user',
 	'`!whitelist remove <guild|user> <id>` - remove it',
@@ -82,7 +87,7 @@ const PREFIX_HELP = [
 	'`!whitelist enable` / `!whitelist disable` - turn the restriction on or off',
 	'`!whitelist sync` - add every server the bot is in to the whitelist',
 	'',
-	'Automation (owner only):',
+	'Automation (owner + admins):',
 	'`!quest auto <quest>` - complete one quest with the operator accounts',
 	'`!quest all [stop]` - run every account, or stop the running queue',
 ] as const;
@@ -113,13 +118,22 @@ export async function handlePrefixCommand(
 	message: Message,
 	services: Services,
 ): Promise<void> {
-	// Only the owner may use the prefix commands.
+	// Bots never use the owner/admin prefix commands.
 	if (message.author.bot) return;
 
 	const raw = message.content.trim();
 	const prefix = services.config.prefix;
 	if (!raw.startsWith(prefix)) return;
-	if (!services.config.ownerIds.includes(message.author.id)) return;
+	if (
+		!services.config.ownerIds.includes(message.author.id) &&
+		!isAdmin({
+			services,
+			userId: message.author.id,
+			member: message.member,
+		})
+	) {
+		return;
+	}
 
 	const tokens = tokenize(raw.slice(prefix.length).trim());
 	if (tokens.length === 0) return;
@@ -144,13 +158,7 @@ export async function handlePrefixCommand(
 			}
 
 			case 'panel': {
-				const payload = buildOwnerPanel(0);
-				await message
-					.reply({
-						embeds: payload.embeds,
-						components: payload.components,
-					})
-					.catch(() => null);
+				await openOwnerPanel(message, rest[0]);
 				return;
 			}
 
@@ -369,10 +377,24 @@ export async function runOwnerPanelCommand(
 	return { embeds, text: parts.join('\n\n') };
 }
 
+async function openOwnerPanel(
+	message: Message,
+	group?: string,
+): Promise<void> {
+	const payload = buildOwnerPanel(0, group);
+	await message
+		.reply({
+			embeds: payload.embeds,
+			components: payload.components,
+		})
+		.catch(() => null);
+}
+
 /** Wraps the captured result with the panel's own embed and navigation. */
 export function buildOwnerPanelResult(
 	id: string,
 	result: OwnerRunResult,
+	group?: string,
 ): PanelPayload {
 	const label = OWNER_COMMANDS.find((entry) => entry.id === id)?.label ?? id;
 	const text = result.text || 'Command completed.';
@@ -382,11 +404,19 @@ export function buildOwnerPanelResult(
 		components: [
 			new ActionRowBuilder<ButtonBuilder>().addComponents(
 				new ButtonBuilder()
-					.setCustomId(`${OWNER_COMMAND_IDS.again}:${id}`)
+					.setCustomId(
+						group
+							? `${OWNER_COMMAND_IDS.again}:${group}:${id}`
+							: `${OWNER_COMMAND_IDS.again}:${id}`,
+					)
 					.setLabel('Run Again')
 					.setStyle(ButtonStyle.Primary),
 				new ButtonBuilder()
-					.setCustomId(OWNER_COMMAND_IDS.back)
+					.setCustomId(
+						group
+							? `${OWNER_COMMAND_IDS.back}:${group}`
+							: OWNER_COMMAND_IDS.back,
+					)
 					.setLabel('Back to Commands')
 					.setStyle(ButtonStyle.Secondary),
 			),
@@ -421,6 +451,10 @@ async function handleRoom(
 	const rest = args.slice(1);
 
 	switch (sub) {
+		case 'open': {
+			await openOwnerPanel(message, 'room');
+			return;
+		}
 		case 'create': {
 			const name = args[1];
 			if (!name) {
@@ -596,6 +630,10 @@ async function handleToken(
 	sub: string | undefined,
 ): Promise<void> {
 	switch (sub) {
+		case 'open': {
+			await openOwnerPanel(message, 'token');
+			return;
+		}
 		case 'list': {
 			const type =
 				args[1] as 'bot' | 'user' | undefined;
@@ -731,6 +769,10 @@ async function handleAdmin(
 	const rest = args.slice(1);
 
 	switch (sub) {
+		case 'open': {
+			await openOwnerPanel(message, 'admin');
+			return;
+		}
 		case 'setup': {
 			const registered = services.registerCommands
 				? await services.registerCommands()
@@ -947,6 +989,10 @@ async function handleWhitelist(
 	sub: string | undefined,
 ): Promise<void> {
 	switch (sub) {
+		case 'open': {
+			await openOwnerPanel(message, 'whitelist');
+			return;
+		}
 		case 'list': {
 			const entries = services.adminService.whitelist();
 			const enabled = services.adminService.isWhitelistEnabled();
@@ -1136,6 +1182,11 @@ async function handleQuest(
 	sub: string | undefined,
 	scope: import('../services/scope').AccountScope,
 ): Promise<void> {
+	if (sub === 'open') {
+		await openOwnerPanel(message, 'quest');
+		return;
+	}
+
 	if (sub === 'stop') {
 		services.autoService.requestStop(scope);
 		await reply(

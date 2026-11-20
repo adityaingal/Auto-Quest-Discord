@@ -263,10 +263,15 @@ export function ownerPanelEmbed(
 	page: number,
 	pages: number,
 	total: number,
+	group?: string,
 ): EmbedBuilder {
 	return new EmbedBuilder()
 		.setColor(COLORS.primary)
-		.setTitle('OWNER CONTROL PANEL')
+		.setTitle(
+			group
+				? `OWNER PANEL · ${group.toUpperCase()}`
+				: 'OWNER CONTROL PANEL',
+		)
 		.setDescription(
 			[
 				'Pick a command below, fill in the modal and the result appears here.',
@@ -277,7 +282,9 @@ export function ownerPanelEmbed(
 			{ name: 'Commands', value: String(total), inline: true },
 			{ name: 'Page', value: `${page + 1} / ${pages}`, inline: true },
 		)
-		.setFooter({ text: 'Owner only - !help lists every text command' });
+		.setFooter({
+			text: 'Owner + admins - !help lists every text command',
+		});
 }
 
 /** The result view after an owner command was run from the panel. */

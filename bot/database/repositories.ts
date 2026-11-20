@@ -1,5 +1,21 @@
 import { Database } from './index';
 
+export type TokenRow = {
+	id: number;
+	label: string;
+	token: string;
+	type: 'bot' | 'user';
+	application_id: string | null;
+	bot_user_id: string | null;
+	bot_username: string | null;
+	account_id: string | null;
+	account_username: string | null;
+	owner_user_id: string | null;
+	status: string;
+	created_at: string;
+	last_checked_at: string | null;
+};
+
 export type AccountLink = {
 	id: number;
 	discord_user_id: string;
@@ -214,6 +230,10 @@ export class Repositories {
 			);
 			this.db.run(
 				'DELETE FROM oauth_states WHERE discord_user_id = ?',
+				discordUserId,
+			);
+			this.db.run(
+				'DELETE FROM tokens WHERE owner_user_id = ?',
 				discordUserId,
 			);
 		});
@@ -560,13 +580,14 @@ export class Repositories {
 		bot_username: string | null;
 		account_id?: string | null;
 		account_username?: string | null;
+		owner_user_id?: string | null;
 	}): void {
 		this.db.run(
 			`INSERT INTO tokens
 				(label, token, type, application_id, bot_user_id, bot_username,
-				 account_id, account_username, status)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
-			 ON CONFLICT(label) DO UPDATE SET
+				 account_id, account_username, owner_user_id, status)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+			 ON CONFLICT(owner_user_id, label) DO UPDATE SET
 				token = excluded.token,
 				type = excluded.type,
 				application_id = excluded.application_id,
@@ -583,45 +604,47 @@ export class Repositories {
 			row.bot_username,
 			row.account_id ?? null,
 			row.account_username ?? null,
+			row.owner_user_id ?? null,
 		);
 	}
 
-	listBotTokens(): {
-		id: number;
-		label: string;
-		token: string;
-		type: 'bot' | 'user';
-		application_id: string | null;
-		bot_user_id: string | null;
-		bot_username: string | null;
-		account_id: string | null;
-		account_username: string | null;
-		status: string;
-		created_at: string;
-		last_checked_at: string | null;
-	}[] {
+	listBotTokens(): TokenRow[] {
 		return this.db.all('SELECT * FROM tokens ORDER BY id ASC');
 	}
 
-	getBotToken(id: number): {
-		id: number;
-		label: string;
-		token: string;
-		type: 'bot' | 'user';
-		application_id: string | null;
-		bot_user_id: string | null;
-		bot_username: string | null;
-		account_id: string | null;
-		account_username: string | null;
-		status: string;
-		created_at: string;
-		last_checked_at: string | null;
-	} | undefined {
+	listBotTokensByOwner(ownerUserId: string | null): TokenRow[] {
+		return this.db.all(
+			'SELECT * FROM tokens WHERE owner_user_id IS ? ORDER BY id ASC',
+			ownerUserId,
+		);
+	}
+
+	getBotToken(id: number): TokenRow | undefined {
 		return this.db.get('SELECT * FROM tokens WHERE id = ?', id);
+	}
+
+	getBotTokenByOwner(
+		id: number,
+		ownerUserId: string | null,
+	): TokenRow | undefined {
+		return this.db.get(
+			'SELECT * FROM tokens WHERE id = ? AND owner_user_id IS ?',
+			id,
+			ownerUserId,
+		);
 	}
 
 	deleteBotToken(id: number): number {
 		const result = this.db.run('DELETE FROM tokens WHERE id = ?', id);
+		return result.changes;
+	}
+
+	deleteBotTokenByOwner(id: number, ownerUserId: string | null): number {
+		const result = this.db.run(
+			'DELETE FROM tokens WHERE id = ? AND owner_user_id IS ?',
+			id,
+			ownerUserId,
+		);
 		return result.changes;
 	}
 

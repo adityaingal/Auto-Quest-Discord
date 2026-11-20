@@ -342,17 +342,37 @@ export const OWNER_COMMANDS: OwnerCommand[] = [
 
 const OWNER_PANEL_PAGE = 15;
 
+function ownerCommandsFor(group?: string): OwnerCommand[] {
+	if (!group) return OWNER_COMMANDS;
+
+	const filtered = OWNER_COMMANDS.filter(
+		(command) =>
+			command.id === group || command.id.startsWith(`${group}.`),
+	);
+
+	return filtered.length > 0 ? filtered : OWNER_COMMANDS;
+}
+
+function ownerPanelCustomId(
+	base: string,
+	group: string | undefined,
+	page: number,
+): string {
+	return group ? `${base}:${group}:${page}` : `${base}:${page}`;
+}
+
 /** The command picker, paginated because Discord allows 25 options at most. */
-export function buildOwnerPanel(page = 0): PanelPayload {
-	const pages = Math.max(1, Math.ceil(OWNER_COMMANDS.length / OWNER_PANEL_PAGE));
+export function buildOwnerPanel(page = 0, group?: string): PanelPayload {
+	const commands = ownerCommandsFor(group);
+	const pages = Math.max(1, Math.ceil(commands.length / OWNER_PANEL_PAGE));
 	const safePage = Math.min(Math.max(page, 0), pages - 1);
-	const slice = OWNER_COMMANDS.slice(
+	const slice = commands.slice(
 		safePage * OWNER_PANEL_PAGE,
 		safePage * OWNER_PANEL_PAGE + OWNER_PANEL_PAGE,
 	);
 
 	const menu = new StringSelectMenuBuilder()
-		.setCustomId(`${OWNER_COMMAND_IDS.select}:${safePage}`)
+		.setCustomId(ownerPanelCustomId(OWNER_COMMAND_IDS.select, group, safePage))
 		.setPlaceholder(`Choose a command (${safePage + 1}/${pages})`)
 		.setMinValues(1)
 		.setMaxValues(1)
@@ -365,17 +385,21 @@ export function buildOwnerPanel(page = 0): PanelPayload {
 		);
 
 	return {
-		embeds: [ownerPanelEmbed(safePage, pages, OWNER_COMMANDS.length)],
+		embeds: [ownerPanelEmbed(safePage, pages, commands.length, group)],
 		components: [
 			new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
 			new ActionRowBuilder<ButtonBuilder>().addComponents(
 				new ButtonBuilder()
-					.setCustomId(`${OWNER_COMMAND_IDS.prev}:${safePage}`)
+					.setCustomId(
+						ownerPanelCustomId(OWNER_COMMAND_IDS.prev, group, safePage),
+					)
 					.setLabel('Previous')
 					.setStyle(ButtonStyle.Secondary)
 					.setDisabled(safePage <= 0),
 				new ButtonBuilder()
-					.setCustomId(`${OWNER_COMMAND_IDS.next}:${safePage}`)
+					.setCustomId(
+						ownerPanelCustomId(OWNER_COMMAND_IDS.next, group, safePage),
+					)
 					.setLabel('Next')
 					.setStyle(ButtonStyle.Secondary)
 					.setDisabled(safePage >= pages - 1),
@@ -385,12 +409,19 @@ export function buildOwnerPanel(page = 0): PanelPayload {
 }
 
 /** Opens a modal with the input fields of the selected owner command. */
-export function ownerCommandModal(id: string): ModalBuilder | null {
+export function ownerCommandModal(
+	id: string,
+	group?: string,
+): ModalBuilder | null {
 	const command = OWNER_COMMANDS.find((entry) => entry.id === id);
 	if (!command || command.fields.length === 0) return null;
 
 	return new ModalBuilder()
-		.setCustomId(`${OWNER_COMMAND_IDS.modal}:${id}`)
+		.setCustomId(
+			group
+				? `${OWNER_COMMAND_IDS.modal}:${group}:${id}`
+				: `${OWNER_COMMAND_IDS.modal}:${id}`,
+		)
 		.setTitle(command.label.slice(0, 45))
 		.addComponents(
 			command.fields.slice(0, 5).map((field, index) =>

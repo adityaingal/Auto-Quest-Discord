@@ -127,3 +127,98 @@ test('a token can be removed', () => {
 
 	db.close();
 });
+
+test('tokens are private to the user who added them', () => {
+	const { db, repositories, service, vault } = createService();
+
+	repositories.addBotToken({
+		label: 'main',
+		token: vault.encrypt('alice-token'),
+		type: 'user',
+		application_id: null,
+		bot_user_id: null,
+		bot_username: null,
+		account_id: 'alice-account',
+		account_username: 'alice',
+		owner_user_id: 'alice',
+	});
+	repositories.addBotToken({
+		label: 'main',
+		token: vault.encrypt('bob-token'),
+		type: 'user',
+		application_id: null,
+		bot_user_id: null,
+		bot_username: null,
+		account_id: 'bob-account',
+		account_username: 'bob',
+		owner_user_id: 'bob',
+	});
+	repositories.addBotToken({
+		label: 'legacy',
+		token: vault.encrypt('legacy-token'),
+		type: 'user',
+		application_id: null,
+		bot_user_id: null,
+		bot_username: null,
+		account_id: 'legacy-account',
+		account_username: 'legacy',
+	});
+
+	assert.equal(repositories.listBotTokens().length, 3);
+	assert.equal(service.list('alice').length, 1);
+	assert.equal(service.list('bob').length, 1);
+	assert.equal(service.list(null).length, 1);
+	assert.equal(service.findByLabel('main', 'alice').accountUsername, 'alice');
+	assert.equal(service.findByLabel('main', 'bob').accountUsername, 'bob');
+	assert.deepEqual(
+		service.resolveUserSessions('alice').map((entry) => entry.token),
+		['alice-token'],
+	);
+	assert.deepEqual(
+		service.resolveUserSessions('bob').map((entry) => entry.token),
+		['bob-token'],
+	);
+	assert.deepEqual(
+		service.resolveUserSessions('alice', true).map((entry) => entry.label),
+		['main', 'legacy'],
+	);
+	assert.equal(service.remove(1, 'bob'), false);
+	assert.equal(service.remove(1, 'alice'), true);
+
+	db.close();
+});
+
+test('purging a user removes their tokens but keeps legacy tokens', () => {
+	const { db, repositories, service, vault } = createService();
+
+	repositories.addBotToken({
+		label: 'mine',
+		token: vault.encrypt('mine'),
+		type: 'user',
+		application_id: null,
+		bot_user_id: null,
+		bot_username: null,
+		owner_user_id: 'alice',
+	});
+	repositories.addBotToken({
+		label: 'legacy',
+		token: vault.encrypt('legacy'),
+		type: 'user',
+		application_id: null,
+		bot_user_id: null,
+		bot_username: null,
+	});
+
+	repositories.purgeUser('alice');
+
+	assert.equal(service.list('alice').length, 0);
+	assert.equal(service.list(null).length, 1);
+	assert.equal(service.list().length, 1);
+
+	db.close();
+});
+
+test('/token add is available to every user', async () => {
+	const { tokenCommand } = await import('../bot/commands/token');
+	assert.equal(tokenCommand.data.toJSON().default_member_permissions, undefined);
+});
