@@ -107,7 +107,10 @@ async function main(): Promise<void> {
 					return;
 				}
 
-				if (interaction.type === InteractionType.MessageComponent) {
+				if (
+					interaction.type === InteractionType.MessageComponent ||
+					interaction.type === InteractionType.ModalSubmit
+				) {
 					await router.handle(interaction);
 					return;
 				}

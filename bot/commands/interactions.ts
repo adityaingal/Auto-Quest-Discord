@@ -15,10 +15,22 @@ import { buildQuestPages, buildQuestSelect, buildPagingRow } from '../ui/compone
 import { errorEmbed, infoEmbed, questDetailEmbed, questListEmbed, questQueueEmbed, progressEmbed } from '../ui/embeds';
 import { isAdmin } from './admin';
 import {
+	buildOwnerPanelResult,
+	runOwnerPanelCommand,
+} from './prefix';
+import {
 	renderQuestPanel,
 	decodeSegment,
 	decodeFilter,
 	filterPayloadQuests,
+	buildOwnerProfilePanel,
+	fetchOwnerPanelUser,
+	ownerProfileModal,
+	OWNER_PANEL_IDS,
+	buildOwnerPanel,
+	ownerCommandModal,
+	OWNER_COMMANDS,
+	OWNER_COMMAND_IDS,
 } from '../ui/panel';
 import type { QueueEntry } from '../ui/embeds';
 import type { QueueJob, AutoProgress } from '../services/autoService';
@@ -56,6 +68,16 @@ export class InteractionRouter {
 		this.register('quest:panel_filter', this.handlePanelFilter);
 		this.register('admin:maintenance_confirm', this.handleMaintenance);
 		this.register('admin:maintenance_cancel', this.handleMaintenanceCancel);
+		this.register(OWNER_PANEL_IDS.input, this.handleOwnerProfileInput);
+		this.register(OWNER_PANEL_IDS.refresh, this.handleOwnerProfileRefresh);
+		this.register(OWNER_PANEL_IDS.submit, this.handleOwnerProfileSubmit);
+		this.register(OWNER_COMMAND_IDS.home, this.handleOwnerPanelHome);
+		this.register(OWNER_COMMAND_IDS.back, this.handleOwnerPanelHome);
+		this.register(OWNER_COMMAND_IDS.select, this.handleOwnerPanelSelect);
+		this.register(OWNER_COMMAND_IDS.prev, this.handleOwnerPanelNav);
+		this.register(OWNER_COMMAND_IDS.next, this.handleOwnerPanelNav);
+		this.register(OWNER_COMMAND_IDS.again, this.handleOwnerPanelAgain);
+		this.register(OWNER_COMMAND_IDS.modal, this.handleOwnerPanelModal);
 	}
 
 	private register(prefix: string, handler: Handler): void {
@@ -64,7 +86,8 @@ export class InteractionRouter {
 
 	async handle(interaction: Interaction): Promise<void> {
 		if (
-			interaction.type !== InteractionType.MessageComponent
+			interaction.type !== InteractionType.MessageComponent &&
+			interaction.type !== InteractionType.ModalSubmit
 		) {
 			return;
 		}
@@ -119,6 +142,198 @@ export class InteractionRouter {
 		services: Services,
 	): AccountScope {
 		return services.scopeFor(interaction.user.id);
+	}
+
+	private isOwner(interaction: Interaction, services: Services): boolean {
+		return services.config.ownerIds.includes(interaction.user.id);
+	}
+
+	private async denyOwner(interaction: Interaction): Promise<void> {
+		if (interaction.isRepliable()) {
+			await interaction.reply({
+				content: 'This panel is for the bot owner only.',
+				flags: MessageFlags.Ephemeral,
+			});
+		}
+	}
+
+	private async handleOwnerProfileInput(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isButton()) return;
+		if (!this.isOwner(interaction, services)) {
+			await this.denyOwner(interaction);
+			return;
+		}
+
+		await interaction.showModal(ownerProfileModal());
+	}
+
+	private async handleOwnerProfileRefresh(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isButton()) return;
+		if (!this.isOwner(interaction, services)) {
+			await this.denyOwner(interaction);
+			return;
+		}
+
+		const id = decodeSegment(interaction.customId.split(':')[2]);
+		const user = await fetchOwnerPanelUser(services, id ?? undefined);
+
+		await interaction.update({
+			...buildOwnerProfilePanel(
+				user,
+				user ? undefined : 'No Discord user found for that id.',
+			),
+		});
+	}
+
+	private async handleOwnerProfileSubmit(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isModalSubmit()) return;
+		if (!this.isOwner(interaction, services)) {
+			await this.denyOwner(interaction);
+			return;
+		}
+
+		await interaction.deferUpdate();
+
+		const user = await fetchOwnerPanelUser(
+			services,
+			interaction.fields.getTextInputValue(OWNER_PANEL_IDS.userId),
+		);
+
+		await interaction.editReply({
+			...buildOwnerProfilePanel(
+				user,
+				user
+					? undefined
+					: 'No Discord user found for that id. Press **Enter User ID** to try again.',
+			),
+		});
+	}
+
+	private async handleOwnerPanelHome(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isButton()) return;
+		if (!this.isOwner(interaction, services)) {
+			await this.denyOwner(interaction);
+			return;
+		}
+
+		await interaction.update({ ...buildOwnerPanel(0) });
+	}
+
+	private async handleOwnerPanelNav(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isButton()) return;
+		if (!this.isOwner(interaction, services)) {
+			await this.denyOwner(interaction);
+			return;
+		}
+
+		const current = Number(interaction.customId.split(':')[2] ?? 0);
+		const next = interaction.customId.startsWith(OWNER_COMMAND_IDS.next);
+		await interaction.update({ ...buildOwnerPanel(next ? current + 1 : current - 1) });
+	}
+
+	private async handleOwnerPanelSelect(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isStringSelectMenu()) return;
+		if (!this.isOwner(interaction, services)) {
+			await this.denyOwner(interaction);
+			return;
+		}
+
+		const id = interaction.values[0];
+		const modal = ownerCommandModal(id);
+
+		if (!modal) {
+			await interaction.deferUpdate();
+			const result = await runOwnerPanelCommand(
+				services,
+				interaction.user.id,
+				id,
+				[],
+			);
+			await interaction.editReply({
+				...buildOwnerPanelResult(id, result),
+			});
+			return;
+		}
+
+		await interaction.showModal(modal);
+	}
+
+	private async handleOwnerPanelAgain(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isButton()) return;
+		if (!this.isOwner(interaction, services)) {
+			await this.denyOwner(interaction);
+			return;
+		}
+
+		const id = interaction.customId.split(':').slice(2).join(':');
+		const modal = ownerCommandModal(id);
+
+		if (!modal) {
+			await interaction.deferUpdate();
+			const result = await runOwnerPanelCommand(
+				services,
+				interaction.user.id,
+				id,
+				[],
+			);
+			await interaction.editReply({
+				...buildOwnerPanelResult(id, result),
+			});
+			return;
+		}
+
+		await interaction.showModal(modal);
+	}
+
+	private async handleOwnerPanelModal(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isModalSubmit()) return;
+		if (!this.isOwner(interaction, services)) {
+			await this.denyOwner(interaction);
+			return;
+		}
+
+		const id = interaction.customId.split(':').slice(2).join(':');
+		const command = OWNER_COMMANDS.find((entry) => entry.id === id);
+		const args = (command?.fields ?? []).map((_, index) =>
+			interaction.fields.getTextInputValue(`field_${index}`).trim(),
+		);
+
+		while (args.length > 0 && args[args.length - 1] === '') {
+			args.pop();
+		}
+
+		await interaction.deferUpdate();
+		const result = await runOwnerPanelCommand(
+			services,
+			interaction.user.id,
+			id,
+			args,
+		);
+		await interaction.editReply({ ...buildOwnerPanelResult(id, result) });
 	}
 
 	private async handleQuestSelect(

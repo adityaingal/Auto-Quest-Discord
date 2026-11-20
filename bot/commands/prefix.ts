@@ -1,9 +1,28 @@
-import { EmbedBuilder, Message } from 'discord.js';
+import {
+	ActionRowBuilder,
+	ButtonBuilder,
+	ButtonStyle,
+	EmbedBuilder,
+	Message,
+} from 'discord.js';
 import { Services } from '../services';
 import { Logger } from '../utils/logger';
 import { AppError, toUserMessage } from '../utils/errors';
-import { infoEmbed, successEmbed, errorEmbed } from '../ui/embeds';
+import {
+	infoEmbed,
+	successEmbed,
+	errorEmbed,
+	ownerPanelResultEmbed,
+} from '../ui/embeds';
 import { COLORS } from '../ui/theme';
+import {
+	buildOwnerPanel,
+	buildOwnerProfilePanel,
+	fetchOwnerPanelUser,
+	OWNER_COMMANDS,
+	OWNER_COMMAND_IDS,
+	type PanelPayload,
+} from '../ui/panel';
 
 /**
  * Owner-only prefix commands.
@@ -24,6 +43,8 @@ type PrefixHandler = (
 
 const PREFIX_HELP = [
 	'`!help` - show this list',
+	'`!panel` - open the owner command panel (input modals + results)',
+	'`!profile [user id]` - open the user profile panel (avatar + username)',
 	'',
 	'Rooms (owner only):',
 	'`!room create <name> [description...]` - create a room',
@@ -122,6 +143,22 @@ export async function handlePrefixCommand(
 				return;
 			}
 
+			case 'panel': {
+				const payload = buildOwnerPanel(0);
+				await message
+					.reply({
+						embeds: payload.embeds,
+						components: payload.components,
+					})
+					.catch(() => null);
+				return;
+			}
+
+			case 'profile': {
+				await handleProfile(message, services, rest[0]);
+				return;
+			}
+
 			case 'room': {
 				const [sub, ...args] = rest;
 				await handleRoom(message, services, args, sub);
@@ -173,6 +210,205 @@ export async function handlePrefixCommand(
 			.reply(toUserMessage(error))
 			.catch(() => undefined);
 	}
+}
+
+type OwnerRunResult = { embeds: EmbedBuilder[]; text: string };
+
+/** Captures the replies of an existing prefix handler for the panel view. */
+function captureOwnerMessage(ownerId: string): {
+	message: Message;
+	parts: string[];
+	embeds: EmbedBuilder[];
+} {
+	const parts: string[] = [];
+	const embeds: EmbedBuilder[] = [];
+	const message = {
+		author: { id: ownerId },
+		channel: {
+			send: async (content: string) => {
+				parts.push(String(content));
+				return null;
+			},
+		},
+		reply: async (options: unknown) => {
+			if (typeof options === 'string') {
+				parts.push(options);
+			} else {
+				const payload = options as {
+					content?: string;
+					embeds?: EmbedBuilder[];
+				};
+				if (payload.content) parts.push(payload.content);
+				if (payload.embeds) embeds.push(...payload.embeds);
+			}
+			return null;
+		},
+	} as unknown as Message;
+
+	return { message, parts, embeds };
+}
+
+/** Runs an owner command from the panel using the text-command handlers. */
+export async function runOwnerPanelCommand(
+	services: Services,
+	ownerId: string,
+	id: string,
+	args: string[],
+): Promise<OwnerRunResult> {
+	const { message, parts, embeds } = captureOwnerMessage(ownerId);
+	const scope = services.scopeFor(ownerId);
+
+	try {
+		switch (id) {
+			case 'profile':
+				await handleProfile(message, services, args[0]);
+				break;
+			case 'room.create':
+				await handleRoom(message, services, ['create', ...args], 'create');
+				break;
+			case 'room.search':
+				await handleRoom(message, services, ['search', ...args], 'search');
+				break;
+			case 'room.list':
+				await handleRoom(message, services, ['list'], 'list');
+				break;
+			case 'room.add':
+				await handleRoom(message, services, ['add', ...args], 'add');
+				break;
+			case 'room.remove':
+				await handleRoom(message, services, ['remove', ...args], 'remove');
+				break;
+			case 'room.delete':
+				await handleRoom(message, services, ['delete', ...args], 'delete');
+				break;
+			case 'room.renew':
+				await handleRoom(message, services, ['renew', ...args], 'renew');
+				break;
+			case 'token.list':
+				await handleToken(message, services, ['list', ...args], 'list');
+				break;
+			case 'token.add':
+				await handleToken(message, services, ['add', ...args], 'add');
+				break;
+			case 'token.import':
+				await handleToken(message, services, ['import', ...args], 'import');
+				break;
+			case 'token.remove':
+				await handleToken(message, services, ['remove', ...args], 'remove');
+				break;
+			case 'token.check':
+				await handleToken(message, services, ['check', ...args], 'check');
+				break;
+			case 'admin.setup':
+				await handleAdmin(message, services, ['setup'], 'setup', scope);
+				break;
+			case 'admin.stats':
+				await handleAdmin(message, services, ['stats'], 'stats', scope);
+				break;
+			case 'admin.users':
+				await handleAdmin(message, services, ['users'], 'users', scope);
+				break;
+			case 'admin.logs':
+				await handleAdmin(message, services, ['logs'], 'logs', scope);
+				break;
+			case 'admin.reload':
+				await handleAdmin(message, services, ['reload'], 'reload', scope);
+				break;
+			case 'admin.backup':
+				await handleAdmin(message, services, ['backup'], 'backup', scope);
+				break;
+			case 'admin.restore':
+				await handleAdmin(message, services, ['restore', ...args], 'restore', scope);
+				break;
+			case 'admin.maintenance':
+				await handleAdmin(message, services, ['maintenance'], 'maintenance', scope);
+				break;
+			case 'admin.config':
+				await handleAdmin(message, services, ['config', ...args], 'config', scope);
+				break;
+			case 'admin.purge':
+				await handleAdmin(message, services, ['purge', ...args], 'purge', scope);
+				break;
+			case 'whitelist.list':
+				await handleWhitelist(message, services, ['list'], 'list');
+				break;
+			case 'whitelist.add':
+				await handleWhitelist(message, services, ['add', ...args], 'add');
+				break;
+			case 'whitelist.remove':
+				await handleWhitelist(message, services, ['remove', ...args], 'remove');
+				break;
+			case 'whitelist.role':
+				await handleWhitelist(message, services, ['role', ...args], 'role');
+				break;
+			case 'whitelist.enable':
+				await handleWhitelist(message, services, ['enable'], 'enable');
+				break;
+			case 'whitelist.disable':
+				await handleWhitelist(message, services, ['disable'], 'disable');
+				break;
+			case 'whitelist.sync':
+				await handleWhitelist(message, services, ['sync'], 'sync');
+				break;
+			case 'quest.auto':
+				await handleQuest(message, services, ['auto', ...args], 'auto', scope);
+				break;
+			case 'quest.all':
+				await handleQuest(message, services, ['all'], 'all', scope);
+				break;
+			case 'quest.stop':
+				await handleQuest(message, services, ['stop'], 'stop', scope);
+				break;
+			default:
+				embeds.push(errorEmbed('Unknown owner command.'));
+		}
+	} catch (error) {
+		embeds.push(errorEmbed(toUserMessage(error)));
+	}
+
+	return { embeds, text: parts.join('\n\n') };
+}
+
+/** Wraps the captured result with the panel's own embed and navigation. */
+export function buildOwnerPanelResult(
+	id: string,
+	result: OwnerRunResult,
+): PanelPayload {
+	const label = OWNER_COMMANDS.find((entry) => entry.id === id)?.label ?? id;
+	const text = result.text || 'Command completed.';
+
+	return {
+		embeds: [ownerPanelResultEmbed(label, text), ...result.embeds].slice(0, 10),
+		components: [
+			new ActionRowBuilder<ButtonBuilder>().addComponents(
+				new ButtonBuilder()
+					.setCustomId(`${OWNER_COMMAND_IDS.again}:${id}`)
+					.setLabel('Run Again')
+					.setStyle(ButtonStyle.Primary),
+				new ButtonBuilder()
+					.setCustomId(OWNER_COMMAND_IDS.back)
+					.setLabel('Back to Commands')
+					.setStyle(ButtonStyle.Secondary),
+			),
+		],
+	};
+}
+
+/** Opens the owner profile panel, optionally with a user id already set. */
+async function handleProfile(
+	message: Message,
+	services: Services,
+	rawUserId: string | undefined,
+): Promise<void> {
+	const user = await fetchOwnerPanelUser(services, rawUserId);
+	const hint = rawUserId && !user
+		? 'No Discord user found for that id. Press **Enter User ID** to try again.'
+		: undefined;
+	const payload = buildOwnerProfilePanel(user, hint);
+
+	await message
+		.reply({ embeds: payload.embeds, components: payload.components })
+		.catch(() => null);
 }
 
 async function handleRoom(

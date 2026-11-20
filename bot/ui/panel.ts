@@ -2,14 +2,23 @@ import {
 	ActionRowBuilder,
 	ButtonBuilder,
 	ButtonStyle,
+	ModalBuilder,
 	StringSelectMenuBuilder,
+	TextInputBuilder,
+	TextInputStyle,
+	type User,
 } from 'discord.js';
 
 import type { Services } from '../services';
 import { QuestEligibility } from '../models/enums';
 import type { AccountScope } from '../services/scope';
 import type { QuestView, QuestDetail } from '../models/quest';
-import { infoEmbed, questPanelEmbed } from './embeds';
+import {
+	infoEmbed,
+	ownerPanelEmbed,
+	ownerProfileEmbed,
+	questPanelEmbed,
+} from './embeds';
 import { formatDuration } from './theme';
 
 export const PANEL_PAGE = 25;
@@ -27,11 +36,391 @@ export const PANEL_IDS = {
 	filter: 'quest:panel_filter',
 } as const;
 
+/** The components of the owner-only user profile panel. */
+export const OWNER_PANEL_IDS = {
+	input: 'owner:profile_input',
+	refresh: 'owner:profile_refresh',
+	submit: 'owner:profile_submit',
+	userId: 'owner_profile_user_id',
+} as const;
+
+/** The components of the unified owner command panel. */
+export const OWNER_COMMAND_IDS = {
+	home: 'owner:panel_home',
+	select: 'owner:panel_select',
+	prev: 'owner:panel_prev',
+	next: 'owner:panel_next',
+	back: 'owner:panel_back',
+	again: 'owner:panel_again',
+	modal: 'owner:panel_modal',
+} as const;
+
+export type OwnerField = {
+	name: string;
+	label: string;
+	placeholder?: string;
+	required?: boolean;
+	paragraph?: boolean;
+	maxLength?: number;
+};
+
+export type OwnerCommand = {
+	id: string;
+	label: string;
+	description: string;
+	fields: OwnerField[];
+};
+
+const f = (
+	name: string,
+	label: string,
+	placeholder?: string,
+	extra: Partial<OwnerField> = {},
+): OwnerField => ({ name, label, placeholder, ...extra });
+
+/** Every owner prefix command, in the order shown in the panel. */
+export const OWNER_COMMANDS: OwnerCommand[] = [
+	{
+		id: 'profile',
+		label: 'Profile',
+		description: 'Show a Discord avatar and username',
+		fields: [f('userId', 'User ID', '123456789012345678', { maxLength: 20 })],
+	},
+	{
+		id: 'room.create',
+		label: 'Room · Create',
+		description: 'Create a room',
+		fields: [
+			f('name', 'Room name', 'Main', { required: true }),
+			f('description', 'Description (optional)', 'Notes'),
+		],
+	},
+	{
+		id: 'room.search',
+		label: 'Room · Search',
+		description: 'Find a room by name',
+		fields: [f('query', 'Room name', 'Main', { required: true })],
+	},
+	{
+		id: 'room.list',
+		label: 'Room · List',
+		description: 'List your rooms',
+		fields: [],
+	},
+	{
+		id: 'room.add',
+		label: 'Room · Add',
+		description: 'Add an account to a room',
+		fields: [
+			f('room', 'Room name', 'Main', { required: true }),
+			f('token', 'User token', 'Token', {
+				required: true,
+				paragraph: true,
+			}),
+		],
+	},
+	{
+		id: 'room.remove',
+		label: 'Room · Remove',
+		description: 'Remove an account slot',
+		fields: [
+			f('room', 'Room name', 'Main', { required: true }),
+			f('slot', 'Slot number', '1', { required: true, maxLength: 4 }),
+		],
+	},
+	{
+		id: 'room.delete',
+		label: 'Room · Delete',
+		description: 'Delete a room',
+		fields: [f('room', 'Room name', 'Main', { required: true })],
+	},
+	{
+		id: 'room.renew',
+		label: 'Room · Renew',
+		description: 'Reset the room timer',
+		fields: [f('room', 'Room name', 'Main', { required: true })],
+	},
+	{
+		id: 'token.list',
+		label: 'Token · List',
+		description: 'List stored tokens',
+		fields: [f('type', 'Type (bot/user, optional)', 'user', { maxLength: 4 })],
+	},
+	{
+		id: 'token.add',
+		label: 'Token · Add',
+		description: 'Register a token',
+		fields: [
+			f('label', 'Label', 'Main', { required: true }),
+			f('token', 'Token', 'Token', { required: true, paragraph: true }),
+			f('type', 'Type (bot/user)', 'user', {
+				required: true,
+				maxLength: 4,
+			}),
+		],
+	},
+	{
+		id: 'token.import',
+		label: 'Token · Import',
+		description: 'Import USER_TOKEN from the environment',
+		fields: [f('label', 'Label (optional)', 'USER_TOKEN')],
+	},
+	{
+		id: 'token.remove',
+		label: 'Token · Remove',
+		description: 'Delete a token',
+		fields: [f('id', 'Token id', '1', { required: true, maxLength: 8 })],
+	},
+	{
+		id: 'token.check',
+		label: 'Token · Check',
+		description: 'Validate a token',
+		fields: [f('id', 'Token id', '1', { required: true, maxLength: 8 })],
+	},
+	{
+		id: 'admin.setup',
+		label: 'Admin · Setup',
+		description: 'Show the setup status',
+		fields: [],
+	},
+	{
+		id: 'admin.stats',
+		label: 'Admin · Stats',
+		description: 'Usage statistics',
+		fields: [],
+	},
+	{
+		id: 'admin.users',
+		label: 'Admin · Users',
+		description: 'Known users',
+		fields: [],
+	},
+	{
+		id: 'admin.logs',
+		label: 'Admin · Logs',
+		description: 'Recent audit log',
+		fields: [],
+	},
+	{
+		id: 'admin.reload',
+		label: 'Admin · Reload',
+		description: 'Reload the quest catalogue',
+		fields: [],
+	},
+	{
+		id: 'admin.backup',
+		label: 'Admin · Backup',
+		description: 'Write a database backup',
+		fields: [],
+	},
+	{
+		id: 'admin.restore',
+		label: 'Admin · Restore',
+		description: 'Restore a database backup',
+		fields: [f('file', 'Backup file', 'backup.sqlite', { required: true })],
+	},
+	{
+		id: 'admin.maintenance',
+		label: 'Admin · Maintenance',
+		description: 'Toggle maintenance mode',
+		fields: [],
+	},
+	{
+		id: 'admin.config',
+		label: 'Admin · Config',
+		description: 'Write a configuration value',
+		fields: [
+			f('key', 'Config key', 'auto.default_account', { required: true }),
+			f('value', 'Value', 'Main', { required: true }),
+		],
+	},
+	{
+		id: 'admin.purge',
+		label: 'Admin · Purge',
+		description: 'Delete all data of a user',
+		fields: [
+			f('userId', 'Discord User ID', '123456789012345678', {
+				required: true,
+				maxLength: 20,
+			}),
+		],
+	},
+	{
+		id: 'whitelist.list',
+		label: 'Whitelist · List',
+		description: 'Show the whitelist',
+		fields: [],
+	},
+	{
+		id: 'whitelist.add',
+		label: 'Whitelist · Add',
+		description: 'Allow a server or user',
+		fields: [
+			f('kind', 'Kind (guild/user)', 'guild', {
+				required: true,
+				maxLength: 5,
+			}),
+			f('id', 'Guild or user ID', '123456789012345678', {
+				required: true,
+				maxLength: 20,
+			}),
+			f('label', 'Label (optional)', 'My Server', { maxLength: 100 }),
+			f('role', 'Role (member/admin)', 'member', { maxLength: 5 }),
+		],
+	},
+	{
+		id: 'whitelist.remove',
+		label: 'Whitelist · Remove',
+		description: 'Remove an entry',
+		fields: [
+			f('kind', 'Kind (guild/user)', 'guild', {
+				required: true,
+				maxLength: 5,
+			}),
+			f('id', 'Guild or user ID', '123456789012345678', {
+				required: true,
+				maxLength: 20,
+			}),
+		],
+	},
+	{
+		id: 'whitelist.role',
+		label: 'Whitelist · Role',
+		description: 'Change the access role',
+		fields: [
+			f('kind', 'Kind (guild/user)', 'guild', {
+				required: true,
+				maxLength: 5,
+			}),
+			f('id', 'Guild or user ID', '123456789012345678', {
+				required: true,
+				maxLength: 20,
+			}),
+			f('role', 'Role (member/admin)', 'admin', {
+				required: true,
+				maxLength: 5,
+			}),
+		],
+	},
+	{
+		id: 'whitelist.enable',
+		label: 'Whitelist · Enable',
+		description: 'Turn the whitelist on',
+		fields: [],
+	},
+	{
+		id: 'whitelist.disable',
+		label: 'Whitelist · Disable',
+		description: 'Turn the whitelist off',
+		fields: [],
+	},
+	{
+		id: 'whitelist.sync',
+		label: 'Whitelist · Sync',
+		description: 'Add every server the bot is in',
+		fields: [],
+	},
+	{
+		id: 'quest.auto',
+		label: 'Quest · Auto',
+		description: 'Complete one quest',
+		fields: [f('quest', 'Quest id or name', 'quest-1', { required: true })],
+	},
+	{
+		id: 'quest.all',
+		label: 'Quest · All',
+		description: 'Run every available quest',
+		fields: [],
+	},
+	{
+		id: 'quest.stop',
+		label: 'Quest · Stop',
+		description: 'Stop the running queue',
+		fields: [],
+	},
+];
+
+const OWNER_PANEL_PAGE = 15;
+
+/** The command picker, paginated because Discord allows 25 options at most. */
+export function buildOwnerPanel(page = 0): PanelPayload {
+	const pages = Math.max(1, Math.ceil(OWNER_COMMANDS.length / OWNER_PANEL_PAGE));
+	const safePage = Math.min(Math.max(page, 0), pages - 1);
+	const slice = OWNER_COMMANDS.slice(
+		safePage * OWNER_PANEL_PAGE,
+		safePage * OWNER_PANEL_PAGE + OWNER_PANEL_PAGE,
+	);
+
+	const menu = new StringSelectMenuBuilder()
+		.setCustomId(`${OWNER_COMMAND_IDS.select}:${safePage}`)
+		.setPlaceholder(`Choose a command (${safePage + 1}/${pages})`)
+		.setMinValues(1)
+		.setMaxValues(1)
+		.setOptions(
+			slice.map((command) => ({
+				label: command.label.slice(0, 100),
+				description: command.description.slice(0, 100),
+				value: command.id,
+			})),
+		);
+
+	return {
+		embeds: [ownerPanelEmbed(safePage, pages, OWNER_COMMANDS.length)],
+		components: [
+			new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
+			new ActionRowBuilder<ButtonBuilder>().addComponents(
+				new ButtonBuilder()
+					.setCustomId(`${OWNER_COMMAND_IDS.prev}:${safePage}`)
+					.setLabel('Previous')
+					.setStyle(ButtonStyle.Secondary)
+					.setDisabled(safePage <= 0),
+				new ButtonBuilder()
+					.setCustomId(`${OWNER_COMMAND_IDS.next}:${safePage}`)
+					.setLabel('Next')
+					.setStyle(ButtonStyle.Secondary)
+					.setDisabled(safePage >= pages - 1),
+			),
+		],
+	};
+}
+
+/** Opens a modal with the input fields of the selected owner command. */
+export function ownerCommandModal(id: string): ModalBuilder | null {
+	const command = OWNER_COMMANDS.find((entry) => entry.id === id);
+	if (!command || command.fields.length === 0) return null;
+
+	return new ModalBuilder()
+		.setCustomId(`${OWNER_COMMAND_IDS.modal}:${id}`)
+		.setTitle(command.label.slice(0, 45))
+		.addComponents(
+			command.fields.slice(0, 5).map((field, index) =>
+				new ActionRowBuilder<TextInputBuilder>().addComponents(
+					new TextInputBuilder()
+						.setCustomId(`field_${index}`)
+						.setLabel(field.label.slice(0, 45))
+						.setPlaceholder(field.placeholder ?? '')
+						.setStyle(
+							field.paragraph
+								? TextInputStyle.Paragraph
+								: TextInputStyle.Short,
+						)
+						.setRequired(field.required ?? false)
+						.setMaxLength(field.maxLength ?? 4000),
+				),
+			),
+		);
+}
+
 export type PanelPayload = {
 	embeds: ReturnType<typeof questPanelEmbed>[];
 	components: ActionRowBuilder<
 		StringSelectMenuBuilder | ButtonBuilder
 	>[];
+};
+
+export type OwnerPanelPayload = {
+	embeds: ReturnType<typeof ownerProfileEmbed>[];
+	components: ActionRowBuilder<ButtonBuilder>[];
 };
 
 /** The task-type categories the user can filter the quests by. */
@@ -380,6 +769,65 @@ export async function renderQuestPanel(
 		account ?? 'your accounts',
 		filter,
 	);
+}
+
+/** Builds the owner profile panel with the same shape as the quest panel. */
+export function buildOwnerProfilePanel(
+	user: User | null,
+	hint?: string,
+): OwnerPanelPayload {
+	return {
+		embeds: [ownerProfileEmbed(user, hint)],
+		components: [
+			new ActionRowBuilder<ButtonBuilder>().addComponents(
+				new ButtonBuilder()
+					.setCustomId(OWNER_PANEL_IDS.input)
+					.setLabel('Enter User ID')
+					.setStyle(ButtonStyle.Primary),
+				new ButtonBuilder()
+					.setCustomId(
+						`${OWNER_PANEL_IDS.refresh}:${accountSegment(user?.id ?? null)}`,
+					)
+					.setLabel('Refresh')
+					.setStyle(ButtonStyle.Secondary)
+					.setDisabled(!user),
+			),
+		],
+	};
+}
+
+/** The modal used to type the Discord user id into the owner panel. */
+export function ownerProfileModal(): ModalBuilder {
+	const input = new TextInputBuilder()
+		.setCustomId(OWNER_PANEL_IDS.userId)
+		.setLabel('Discord User ID')
+		.setPlaceholder('123456789012345678')
+		.setStyle(TextInputStyle.Short)
+		.setMinLength(17)
+		.setMaxLength(20)
+		.setRequired(true);
+
+	return new ModalBuilder()
+		.setCustomId(OWNER_PANEL_IDS.submit)
+		.setTitle('Enter User ID')
+		.addComponents(
+			new ActionRowBuilder<TextInputBuilder>().addComponents(input),
+		);
+}
+
+/** Resolves a typed id to a Discord user, or null when it is not one. */
+export async function fetchOwnerPanelUser(
+	services: Services,
+	raw: string | undefined,
+): Promise<User | null> {
+	const id = raw?.trim() ?? '';
+	if (!/^\d{17,20}$/.test(id)) return null;
+
+	try {
+		return await services.client.users.fetch(id);
+	} catch {
+		return null;
+	}
 }
 
 /** A short summary of a quest's reward - used by the select menu. */

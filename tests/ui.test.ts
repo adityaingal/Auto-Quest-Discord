@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EmbedBuilder } from 'discord.js';
+import { EmbedBuilder, type User } from 'discord.js';
 import {
 	COLORS,
 	formatDuration,
@@ -8,6 +8,15 @@ import {
 	relativeTime,
 } from '../bot/ui/theme';
 import { errorEmbed, questDetailEmbed, questListEmbed } from '../bot/ui/embeds';
+import {
+	buildOwnerPanel,
+	buildOwnerProfilePanel,
+	OWNER_COMMANDS,
+	OWNER_COMMAND_IDS,
+	OWNER_PANEL_IDS,
+	ownerCommandModal,
+	ownerProfileModal,
+} from '../bot/ui/panel';
 import {
 	AppError,
 	ConfigError,
@@ -136,6 +145,70 @@ test('the error embed is a discord embed', () => {
 	const embed = errorEmbed('nope');
 	assert.ok(embed instanceof EmbedBuilder);
 	assert.equal(embed.toJSON().color, COLORS.danger);
+});
+
+test('the owner profile panel shows the avatar and username', () => {
+	const avatar = 'https://cdn.discordapp.com/avatars/123/abc.png';
+	const user = {
+		id: '123456789012345678',
+		username: 'tester',
+		displayAvatarURL: () => avatar,
+	} as unknown as User;
+
+	const payload = buildOwnerProfilePanel(user);
+	const json = payload.embeds[0].toJSON();
+	const components = JSON.stringify(
+		payload.components.map((row) => row.toJSON()),
+	);
+
+	assert.ok(json.description?.includes('tester'));
+	assert.equal(json.image?.url, avatar);
+	assert.equal(json.thumbnail?.url, avatar);
+	assert.ok(components.includes(OWNER_PANEL_IDS.input));
+	assert.ok(components.includes(OWNER_PANEL_IDS.refresh));
+});
+
+test('the owner profile modal asks for a discord user id', () => {
+	const json = ownerProfileModal().toJSON();
+
+	assert.equal(json.custom_id, OWNER_PANEL_IDS.submit);
+	assert.ok(JSON.stringify(json.components).includes(OWNER_PANEL_IDS.userId));
+});
+
+test('the owner panel lists every owner command across pages', () => {
+	const menuOf = (page: number) => {
+		const row = buildOwnerPanel(page).components[0].toJSON() as {
+			components: {
+				custom_id: string;
+				options: { value: string }[];
+			}[];
+		};
+		return row.components[0];
+	};
+
+	const first = menuOf(0);
+	assert.ok(first.custom_id.startsWith(OWNER_COMMAND_IDS.select));
+	assert.equal(first.options.length, 15);
+	assert.ok(buildOwnerPanel(0).embeds[0].toJSON().title?.includes('OWNER'));
+
+	const last = menuOf(999);
+	assert.ok(last.options.length > 0);
+	assert.ok(
+		last.options.some(
+			(option) => option.value === OWNER_COMMANDS[OWNER_COMMANDS.length - 1].id,
+		),
+	);
+});
+
+test('the owner panel builds a modal only for commands with inputs', () => {
+	assert.equal(ownerCommandModal('admin.stats'), null);
+
+	const modal = ownerCommandModal('room.create');
+	assert.ok(modal);
+	const json = modal.toJSON();
+	assert.ok(json.custom_id.startsWith(OWNER_COMMAND_IDS.modal));
+	assert.ok(JSON.stringify(json.components).includes('field_0'));
+	assert.ok(JSON.stringify(json.components).includes('field_1'));
 });
 
 test('the config refuses to start without a bot token', () => {

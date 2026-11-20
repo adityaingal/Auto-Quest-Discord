@@ -1,4 +1,4 @@
-import { EmbedBuilder } from 'discord.js';
+import { EmbedBuilder, type User } from 'discord.js';
 import {
 	ELIGIBILITY_LABELS,
 	PLATFORM_NAMES,
@@ -257,6 +257,63 @@ export function questPanelEmbed(
 
 	return embed;
 }
+
+/** The home view of the unified owner command panel. */
+export function ownerPanelEmbed(
+	page: number,
+	pages: number,
+	total: number,
+): EmbedBuilder {
+	return new EmbedBuilder()
+		.setColor(COLORS.primary)
+		.setTitle('OWNER CONTROL PANEL')
+		.setDescription(
+			[
+				'Pick a command below, fill in the modal and the result appears here.',
+				'The text commands (`!room`, `!token`, `!admin`, `!whitelist`, `!quest`) still work as before.',
+			].join('\n\n'),
+		)
+		.addFields(
+			{ name: 'Commands', value: String(total), inline: true },
+			{ name: 'Page', value: `${page + 1} / ${pages}`, inline: true },
+		)
+		.setFooter({ text: 'Owner only - !help lists every text command' });
+}
+
+/** The result view after an owner command was run from the panel. */
+export function ownerPanelResultEmbed(
+	label: string,
+	text: string,
+): EmbedBuilder {
+	return new EmbedBuilder()
+		.setColor(COLORS.primary)
+		.setTitle(`OWNER PANEL · ${label}`)
+		.setDescription(text.slice(0, 4000) || 'Done.');
+}
+
+/** The owner profile panel: just the Discord avatar and the username. */
+export function ownerProfileEmbed(
+	user: User | null,
+	hint?: string,
+): EmbedBuilder {
+	const embed = new EmbedBuilder()
+		.setColor(COLORS.primary)
+		.setTitle('USER PROFILE');
+
+	if (!user) {
+		return embed.setDescription(
+			hint ?? 'Select a user with **Enter User ID** to view their profile.',
+		);
+	}
+
+	const avatar = user.displayAvatarURL({ size: 1024 });
+
+	return embed
+		.setDescription(`**${user.username}**\n\`${user.id}\``)
+		.setThumbnail(avatar)
+		.setImage(avatar);
+}
+
 export function progressEmbed(
 	entries: {
 		questId: string;
