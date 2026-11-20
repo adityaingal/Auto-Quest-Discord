@@ -81,7 +81,7 @@ export class InteractionRouter {
 	}
 
 	private register(prefix: string, handler: Handler): void {
-		this.handlers.set(prefix, handler);
+		this.handlers.set(prefix, handler.bind(this));
 	}
 
 	async handle(interaction: Interaction): Promise<void> {

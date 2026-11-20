@@ -26,6 +26,7 @@ import {
 } from '../bot/utils/errors';
 import { loadConfig } from '../bot/config';
 import { QuestEligibility } from '../bot/models/enums';
+import { InteractionRouter } from '../bot/commands/interactions';
 
 function questStub() {
 	return {
@@ -209,6 +210,33 @@ test('the owner panel builds a modal only for commands with inputs', () => {
 	assert.ok(json.custom_id.startsWith(OWNER_COMMAND_IDS.modal));
 	assert.ok(JSON.stringify(json.components).includes('field_0'));
 	assert.ok(JSON.stringify(json.components).includes('field_1'));
+});
+
+test('the owner panel select menu opens a modal', async () => {
+	const router = new InteractionRouter({
+		config: { ownerIds: ['1'] },
+	} as never);
+	let shown: { toJSON(): { custom_id: string } } | null = null;
+	const interaction = {
+		type: 3,
+		customId: 'owner:panel_select:0',
+		user: { id: '1' },
+		values: ['room.create'],
+		isStringSelectMenu: () => true,
+		isRepliable: () => true,
+		showModal: async (modal: { toJSON(): { custom_id: string } }) => {
+			shown = modal;
+		},
+		reply: async () => undefined,
+	} as never;
+
+	await router.handle(interaction);
+
+	assert.ok(shown, 'the modal was not shown');
+	assert.equal(
+		(shown as { toJSON(): { custom_id: string } }).toJSON().custom_id,
+		'owner:panel_modal:room.create',
+	);
 });
 
 test('the config refuses to start without a bot token', () => {
