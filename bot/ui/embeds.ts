@@ -19,6 +19,7 @@ const STATUS_EMOJI: Record<QuestEligibility, string> = {
 	[QuestEligibility.ENROLLED]: EMOJI.enrolled,
 	[QuestEligibility.IN_PROGRESS]: EMOJI.inProgress,
 	[QuestEligibility.COMPLETED]: EMOJI.completed,
+	[QuestEligibility.EXPIRED]: EMOJI.expired,
 	[QuestEligibility.UNAVAILABLE]: EMOJI.unavailable,
 };
 
@@ -27,6 +28,7 @@ const STATUS_COLOR: Record<QuestEligibility, number> = {
 	[QuestEligibility.ENROLLED]: COLORS.info,
 	[QuestEligibility.IN_PROGRESS]: COLORS.warning,
 	[QuestEligibility.COMPLETED]: COLORS.success,
+	[QuestEligibility.EXPIRED]: COLORS.danger,
 	[QuestEligibility.UNAVAILABLE]: COLORS.neutral,
 };
 
@@ -470,4 +472,271 @@ export function infoEmbed(
 	}
 
 	return embed;
+}
+
+/**
+ * The official quest URL of a quest, but only when the catalogue actually
+ * published one over https. A missing or non-https link yields null so no
+ * button is ever rendered for an unverified target.
+ */
+export function verifiedQuestUrl(
+	quest: { ctaLink?: string | null },
+): string | null {
+	const raw = quest.ctaLink?.trim();
+	if (!raw) return null;
+
+	try {
+		const url = new URL(raw);
+		return url.protocol === 'https:' ? url.toString() : null;
+	} catch {
+		return null;
+	}
+}
+
+function platformText(quest: QuestView): string {
+	return (
+		quest.platforms
+			.map((id) => PLATFORM_NAMES[id] ?? `Platform ${id}`)
+			.join(', ') || 'unspecified'
+	);
+}
+
+/**
+ * The public "new quest" announcement. It only carries catalogue data -
+ * never a token, an account, a user id or any private progress.
+ */
+export function questAnnouncementEmbed(quest: QuestDetail): EmbedBuilder {
+	const reward = quest.rewards[0] ?? null;
+	const rewardText = reward
+		? `${reward.name}${reward.orbQuantity ? ` - ${reward.orbQuantity} Orbs` : ''}`
+		: 'none advertised';
+
+	const requirements = quest.tasks.length
+		? quest.tasks
+				.map((task) => `\`${task.type}\` - ${formatDuration(task.target)}`)
+				.join('\n')
+		: 'unknown';
+
+	const promo = [
+		quest.gameTitle ?? quest.applicationName ?? 'Unknown game',
+		quest.publisher ? `by ${quest.publisher}` : null,
+		quest.description ?? null,
+	]
+		.filter(Boolean)
+		.join(' - ');
+
+	const embed = new EmbedBuilder()
+		.setColor(STATUS_COLOR[quest.eligibility])
+		.setTitle(`NEW QUEST: ${quest.name}`)
+		.setDescription(promo)
+		.addFields(
+			{ name: 'Reward', value: rewardText, inline: true },
+			{
+				name: 'Platform',
+				value: platformText(quest),
+				inline: true,
+			},
+			{
+				name: 'Availability',
+				value: eligibilityLabel(quest),
+				inline: true,
+			},
+			{ name: 'Task requirements', value: requirements },
+			{
+				name: 'Expires',
+				value: quest.expiresAt
+					? `${new Date(quest.expiresAt).toUTCString()} (${relativeTime(
+							quest.expiresAt,
+						)})`
+					: 'unknown',
+				inline: true,
+			},
+		)
+		.setFooter({
+			text: `Quest ID ${quest.id} - source: ${quest.source}${
+				quest.live ? ' (live)' : ''
+			}`,
+		})
+		.setTimestamp();
+
+	if (quest.imageUrl) {
+		embed.setImage(quest.imageUrl);
+	}
+
+	const url = verifiedQuestUrl(quest);
+	if (url) {
+		embed.setURL(url);
+	}
+
+	return embed;
+}
+
+/** One line of the public quest list, kept short enough for 25 per embed. */
+function publicQuestLine(index: number, quest: QuestView): string {
+	const reward = quest.rewards[0];
+	const rewardText = reward
+		? reward.orbQuantity
+			? `${reward.orbQuantity} Orbs`
+			: reward.name
+		: 'no reward';
+
+	const expires = quest.expiresAt
+		? new Date(quest.expiresAt).toISOString().slice(0, 10)
+		: 'no date';
+
+	return (
+		`**${index + 1}. ${quest.name}** - ` +
+		`${STATUS_EMOJI[quest.eligibility]} ${ELIGIBILITY_LABELS[quest.eligibility]} - ` +
+		`${rewardText} - ${expires}`
+	);
+}
+
+/**
+ * The public "Available Quests" browser. It shows catalogue entries only -
+ * no progress, no accounts, no scope-private data - and is paginated in
+ * pages of at most 25 (Discord's embed/dropdown limit).
+ */
+export function publicQuestListEmbed(
+	quests: QuestView[],
+	page: number,
+	pages: number,
+): EmbedBuilder {
+	const safePage = Math.min(Math.max(page, 0), Math.max(pages - 1, 0));
+	const slice = quests.slice(safePage * 25, safePage * 25 + 25);
+
+	const embed = new EmbedBuilder()
+		.setColor(COLORS.primary)
+		.setTitle('AVAILABLE QUESTS')
+		.setFooter({
+			text: `Page ${safePage + 1}/${Math.max(pages, 1)} - catalogue data only`,
+		})
+		.setTimestamp();
+
+	if (slice.length === 0) {
+		embed.setDescription(
+			'No quests are available right now. Use **Refresh** to try again.',
+		);
+		return embed;
+	}
+
+	embed.setDescription(
+		slice
+			.map((quest, index) => publicQuestLine(safePage * 25 + index, quest))
+			.join('\n')
+			.slice(0, 4000),
+	);
+
+	return embed;
+}
+
+/** The detail view of one quest for the public browser. */
+export function publicQuestDetailEmbed(quest: QuestDetail): EmbedBuilder {
+	const reward = quest.rewards[0] ?? null;
+
+	const embed = new EmbedBuilder()
+		.setColor(STATUS_COLOR[quest.eligibility])
+		.setTitle(`QUEST: ${quest.name}`)
+		.setDescription(
+			[
+				quest.gameTitle ?? quest.applicationName ?? 'Unknown game',
+				quest.publisher ? `by ${quest.publisher}` : null,
+			]
+				.filter(Boolean)
+				.join(' - '),
+		)
+		.addFields(
+			{ name: 'Status', value: eligibilityLabel(quest), inline: true },
+			{ name: 'Platform', value: platformText(quest), inline: true },
+			{
+				name: 'Reward',
+				value: reward
+					? `${reward.name}${reward.orbQuantity ? ` - ${reward.orbQuantity} Orbs` : ''}`
+					: 'none advertised',
+				inline: true,
+			},
+			{
+				name: 'Requirements',
+				value: quest.tasks.length
+					? quest.tasks
+							.map(
+								(task) =>
+									`\`${task.type}\` - ${formatDuration(task.target)}`,
+							)
+							.join('\n')
+					: 'unknown',
+			},
+			{
+				name: 'Expires',
+				value: quest.expiresAt
+					? `${new Date(quest.expiresAt).toUTCString()} (${relativeTime(
+							quest.expiresAt,
+						)})`
+					: 'unknown',
+				inline: true,
+			},
+		)
+		.setFooter({ text: `Quest ID ${quest.id} - source: ${quest.source}` })
+		.setTimestamp();
+
+	if (quest.imageUrl) {
+		embed.setImage(quest.imageUrl);
+	}
+
+	return embed;
+}
+
+/**
+ * The summary of "Check All Quest Progress". It only counts the caller's
+ * own quests; the reply is ephemeral and no reward is ever claimed here.
+ */
+export function checkProgressEmbed(summary: {
+	total: number;
+	available: number;
+	inProgress: number;
+	completed: number;
+	expired: number;
+	unavailable: number;
+	claimable: number;
+	live: boolean;
+	accounts: string[];
+}): EmbedBuilder {
+	const lines = [
+		summary.live
+			? `Refreshed from **${summary.accounts.length}** authenticated account${
+					summary.accounts.length === 1 ? '' : 's'
+				} (${summary.accounts.join(', ')}).`
+			: 'No authenticated account answered - the last recorded progress is shown.',
+		'',
+		'Progress values come from Discord responses only. Nothing was claimed automatically.',
+	];
+
+	return new EmbedBuilder()
+		.setColor(COLORS.primary)
+		.setTitle('QUEST PROGRESS CHECK')
+		.setDescription(lines.join('\n'))
+		.addFields(
+			{ name: 'Total quests', value: String(summary.total), inline: true },
+			{
+				name: 'Available',
+				value: String(summary.available),
+				inline: true,
+			},
+			{
+				name: 'In progress',
+				value: String(summary.inProgress),
+				inline: true,
+			},
+			{
+				name: 'Completed',
+				value: String(summary.completed),
+				inline: true,
+			},
+			{ name: 'Expired', value: String(summary.expired), inline: true },
+			{
+				name: 'Claimable rewards',
+				value: String(summary.claimable),
+				inline: true,
+			},
+		)
+		.setTimestamp();
 }

@@ -29,6 +29,12 @@ export type Config = {
 	/** A Discord webhook URL in the developer guild that receives every room
 	 *  event. Optional - when unset, no webhook posts are sent. */
 	webhookUrl: string | null;
+	/**
+	 * Public channel for the "new quest discovered" announcements.
+	 * Optional - when unset, announcements are tracked in the database but
+	 * never posted. Does not change NOTIFY_CHANNEL_ID (status messages).
+	 */
+	publicQuestChannelId: string | null;
 };
 
 function readDotEnv(
@@ -137,5 +143,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		port: Number(env.PORT ?? 3000),
 		prefix: env.PREFIX?.trim() || '!',
 		webhookUrl: env.WEBHOOK_URL?.trim() || null,
+		publicQuestChannelId:
+			env.PUBLIC_QUEST_CHANNEL_ID?.trim() || null,
 	};
 }

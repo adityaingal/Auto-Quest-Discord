@@ -273,6 +273,27 @@ export const MIGRATIONS: Migration[] = [
 				ON tokens (owner_user_id);
 		`,
 	},
+	{
+		version: 9,
+		name: 'quest_announcements',
+		sql: `
+			CREATE TABLE IF NOT EXISTS quest_announcements (
+				quest_id TEXT PRIMARY KEY,
+				first_discovered_at TEXT NOT NULL DEFAULT (datetime('now')),
+				last_detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+				announcement_status TEXT NOT NULL DEFAULT 'pending',
+				message_id TEXT,
+				channel_id TEXT,
+				updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_quest_announcements_status
+				ON quest_announcements (announcement_status);
+
+			CREATE INDEX IF NOT EXISTS idx_quest_announcements_detected
+				ON quest_announcements (last_detected_at DESC);
+		`,
+	},
 ];
 
 export class Database {

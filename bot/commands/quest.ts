@@ -12,8 +12,8 @@ import {
 	buildPagingRow,
 	buildStartConfirmRow,
 } from '../ui/components';
-import { questDetailEmbed, questListEmbed, questQueueEmbed } from '../ui/embeds';
-import { renderQuestPanel } from '../ui/panel';
+import { questDetailEmbed, questListEmbed, questQueueEmbed, checkProgressEmbed } from '../ui/embeds';
+import { renderQuestPanel, renderPublicQuestPanel } from '../ui/panel';
 import type { QueueEntry } from '../ui/embeds';
 import { infoEmbed, successEmbed } from '../ui/embeds';
 import { ELIGIBILITY_LABELS, PLATFORM_NAMES } from '../models/enums';
@@ -300,6 +300,39 @@ export const questCommand = group(
 					content:
 						`Refreshed **${result.quests.length}** quests from the **${result.source}** source.`,
 					flags: MessageFlags.Ephemeral,
+				});
+			},
+		},
+		{
+			name: 'available',
+			description:
+				'Browse the public list of available quests (catalogue data only).',
+			run: async (context: CommandContext) => {
+				const { interaction, services } = context;
+				const payload = await renderPublicQuestPanel(services, 0);
+
+				// Public feature: the panel is not ephemeral so everybody in
+				// the channel can browse it. It only shows catalogue data.
+				await interaction.reply({
+					...payload,
+				});
+			},
+		},
+		{
+			name: 'check',
+			description:
+				'Check all quest progress for your own accounts and refresh it from Discord.',
+			run: async (context: CommandContext) => {
+				const { interaction, services, scope } = context;
+
+				await interaction.deferReply({
+					flags: MessageFlags.Ephemeral,
+				});
+
+				const summary = await services.questService.checkAll(scope);
+
+				await interaction.editReply({
+					embeds: [checkProgressEmbed(summary)],
 				});
 			},
 		},

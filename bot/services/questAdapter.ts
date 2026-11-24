@@ -66,9 +66,20 @@ function buildProgress(quest: Quest): QuestProgressView | null {
 	};
 }
 
+/**
+ * Resolves the state of a quest from authoritative Discord data only.
+ *
+ * Order matters:
+ * 1. A completed quest stays **Completed** even when its expiry date has
+ *    passed - the completion happened while it was live.
+ * 2. Otherwise a past `expires_at` is reported as **Expired** (it can no
+ *    longer be started or progressed) - it is not silently folded into
+ *    "Unavailable", which would hide the reason from the user.
+ * 3. Progress, enrolment and availability follow the recorded user status.
+ */
 export function resolveEligibility(quest: Quest): QuestEligibility {
-	if (quest.isExpired()) return QuestEligibility.UNAVAILABLE;
 	if (quest.isCompleted()) return QuestEligibility.COMPLETED;
+	if (quest.isExpired()) return QuestEligibility.EXPIRED;
 	if (quest.progress > 0) return QuestEligibility.IN_PROGRESS;
 	if (quest.isEnrolledQuest()) return QuestEligibility.ENROLLED;
 

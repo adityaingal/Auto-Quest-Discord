@@ -22,12 +22,21 @@ export class CatalogProvider implements QuestProvider {
 	private load(): Quest[] {
 		if (this.quests) return this.quests;
 
+		this.reload();
+
+		return this.quests!;
+	}
+
+	/**
+	 * Drops the in-memory cache so the next read picks the file up again.
+	 * Without it a long running process would serve the snapshot it read at
+	 * startup and `!admin reload` could never show a newer quest.json.
+	 */
+	reload(): void {
 		const raw = readFileSync(this.catalogPath, 'utf8');
 		const parsed = JSON.parse(raw) as AllQuestsResponse;
 
 		this.quests = (parsed.quests ?? []).map((quest) => Quest.create(quest));
-
-		return this.quests;
 	}
 
 	async list(): Promise<QuestView[]> {

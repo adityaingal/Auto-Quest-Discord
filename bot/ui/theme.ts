@@ -12,6 +12,7 @@ export const EMOJI = {
 	enrolled: '🔵',
 	inProgress: '🟡',
 	completed: '✅',
+	expired: '🔴',
 	unavailable: '⚫',
 } as const;
 

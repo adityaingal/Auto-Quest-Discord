@@ -18,7 +18,11 @@ import {
 	ownerPanelEmbed,
 	ownerProfileEmbed,
 	questPanelEmbed,
+	publicQuestDetailEmbed,
+	publicQuestListEmbed,
+	verifiedQuestUrl,
 } from './embeds';
+import { buildCheckAllRow } from './components';
 import { formatDuration } from './theme';
 
 export const PANEL_PAGE = 25;
@@ -34,6 +38,17 @@ export const PANEL_IDS = {
 	help: 'quest:panel_help',
 	completeAll: 'quest:panel_complete_all',
 	filter: 'quest:panel_filter',
+} as const;
+
+/** The custom ids of the public "Available Quests" browser. */
+export const PUBLIC_PANEL_IDS = {
+	select: 'quest:pub_select',
+	prev: 'quest:pub_prev',
+	next: 'quest:pub_next',
+	refresh: 'quest:pub_refresh',
+	details: 'quest:pub_details',
+	open: 'quest:pub_open',
+	pageInfo: 'quest:pub_pageinfo',
 } as const;
 
 /** The components of the owner-only user profile panel. */
@@ -553,6 +568,7 @@ const STATUS_TEXT: Record<QuestEligibility, string> = {
 	[QuestEligibility.AVAILABLE]: 'available',
 	[QuestEligibility.ENROLLED]: 'enrolled',
 	[QuestEligibility.IN_PROGRESS]: 'in progress',
+	[QuestEligibility.EXPIRED]: 'expired',
 	[QuestEligibility.UNAVAILABLE]: 'unavailable',
 	[QuestEligibility.COMPLETED]: 'completed',
 };
@@ -738,11 +754,206 @@ export function buildQuestPanel(
 			actionButtons(quest, account),
 			filterButtons(filter, account),
 			completeAllButton(account, filter),
+			buildCheckAllRow(),
 			questSelectMenu(filtered, quest.id, safePage, account, filter),
 			...(totalPages > 1
 				? [navButtons(safePage, totalPages, quest.id, account, filter)]
 				: []),
 		],
+	};
+}
+
+// ------------------------------------------------- public quest browser
+
+/** Splits the catalogue into pages of at most 25 (Discord's dropdown limit). */
+export function publicQuestPages(quests: QuestView[]): QuestView[][] {
+	const pages: QuestView[][] = [];
+
+	for (let index = 0; index < quests.length; index += PANEL_PAGE) {
+		pages.push(quests.slice(index, index + PANEL_PAGE));
+	}
+
+	return pages.length > 0 ? pages : [[]];
+}
+
+/**
+ * The public "Available Quests" browser: catalogue entries only (name,
+ * reward, platform, status, expiration) - never a progress value or any
+ * other scope-private data. `linkQuest` powers the optional "View Official
+ * Quest" button when the catalogue published a verified https URL.
+ */
+export function buildPublicQuestPanel(
+	quests: QuestView[],
+	page = 0,
+	linkQuest: QuestDetail | null = null,
+): PanelPayload {
+	const pages = publicQuestPages(quests);
+	const safePage = Math.min(Math.max(page, 0), pages.length - 1);
+	const slice = pages[safePage] ?? [];
+	const components: ActionRowBuilder<
+		StringSelectMenuBuilder | ButtonBuilder
+	>[] = [];
+
+	if (slice.length > 0) {
+		const menu = new StringSelectMenuBuilder()
+			.setCustomId(`${PUBLIC_PANEL_IDS.select}:${safePage}`)
+			.setPlaceholder(
+				pages.length > 1
+					? `Select a quest (${safePage + 1}/${pages.length})`
+					: 'Select a quest',
+			)
+			.setMinValues(1)
+			.setMaxValues(1)
+			.setOptions(
+				slice.map((quest) => ({
+					label: quest.name.slice(0, 100),
+					description: describeQuest(quest),
+					value: quest.id,
+				})),
+			);
+
+		components.push(
+			new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
+		);
+	}
+
+	components.push(
+		new ActionRowBuilder<ButtonBuilder>().addComponents(
+			new ButtonBuilder()
+				.setCustomId(`${PUBLIC_PANEL_IDS.prev}:${safePage}`)
+				.setLabel('Previous')
+				.setStyle(ButtonStyle.Secondary)
+				.setDisabled(safePage <= 0),
+			new ButtonBuilder()
+				.setCustomId(PUBLIC_PANEL_IDS.pageInfo)
+				.setLabel(`Page ${safePage + 1}/${pages.length}`)
+				.setStyle(ButtonStyle.Primary)
+				.setDisabled(true),
+			new ButtonBuilder()
+				.setCustomId(`${PUBLIC_PANEL_IDS.next}:${safePage}`)
+				.setLabel('Next')
+				.setStyle(ButtonStyle.Secondary)
+				.setDisabled(safePage >= pages.length - 1),
+			new ButtonBuilder()
+				.setCustomId(`${PUBLIC_PANEL_IDS.refresh}:${safePage}`)
+				.setLabel('Refresh')
+				.setStyle(ButtonStyle.Success),
+		),
+	);
+
+	const detailComponents: ButtonBuilder[] = [
+		new ButtonBuilder()
+			.setCustomId(`${PUBLIC_PANEL_IDS.details}:${safePage}`)
+			.setLabel('Quest Details')
+			.setStyle(ButtonStyle.Primary),
+	];
+
+	const url = linkQuest ? verifiedQuestUrl(linkQuest) : null;
+	if (url) {
+		detailComponents.push(
+			new ButtonBuilder()
+				.setLabel('View Official Quest')
+				.setStyle(ButtonStyle.Link)
+				.setURL(url),
+		);
+	}
+
+	components.push(
+		new ActionRowBuilder<ButtonBuilder>().addComponents(detailComponents),
+	);
+
+	return {
+		embeds: [publicQuestListEmbed(quests, safePage, pages.length)],
+		components,
+	};
+}
+
+/**
+ * Renders the public browser from the authoritative catalogue. The optional
+ * "View Official Quest" button is only added when the first quest of the
+ * page really has a verified https URL.
+ */
+export async function renderPublicQuestPanel(
+	services: Services,
+	page = 0,
+): Promise<PanelPayload> {
+	const quests = await services.catalog.list();
+	const pages = publicQuestPages(quests);
+	const safePage = Math.min(Math.max(page, 0), pages.length - 1);
+	const first = pages[safePage]?.[0] ?? null;
+
+	let linkQuest: QuestDetail | null = null;
+	if (first) {
+		try {
+			linkQuest = await services.catalog.get(first.id);
+		} catch {
+			linkQuest = null;
+		}
+	}
+
+	return buildPublicQuestPanel(quests, safePage, linkQuest);
+}
+
+/**
+ * The detail view of one quest inside the public browser: the catalogue
+ * detail plus the official link (when verified), the page navigation and a
+ * way back to the list. Still catalogue data only.
+ */
+export function buildPublicQuestDetailPanel(
+	quest: QuestDetail,
+	page = 0,
+): PanelPayload {
+	const components: ActionRowBuilder<
+		StringSelectMenuBuilder | ButtonBuilder
+	>[] = [];
+
+	const url = verifiedQuestUrl(quest);
+	if (url) {
+		components.push(
+			new ActionRowBuilder<ButtonBuilder>().addComponents(
+				new ButtonBuilder()
+					.setLabel('View Official Quest')
+					.setStyle(ButtonStyle.Link)
+					.setURL(url),
+			),
+		);
+	}
+
+	components.push(
+		new ActionRowBuilder<ButtonBuilder>().addComponents(
+			new ButtonBuilder()
+				.setCustomId(`${PUBLIC_PANEL_IDS.prev}:${page}`)
+				.setLabel('Previous')
+				.setStyle(ButtonStyle.Secondary)
+				.setDisabled(page <= 0),
+			new ButtonBuilder()
+				.setCustomId(PUBLIC_PANEL_IDS.pageInfo)
+				.setLabel(`Page ${page + 1}`)
+				.setStyle(ButtonStyle.Primary)
+				.setDisabled(true),
+			new ButtonBuilder()
+				.setCustomId(`${PUBLIC_PANEL_IDS.next}:${page}`)
+				.setLabel('Next')
+				.setStyle(ButtonStyle.Secondary),
+			new ButtonBuilder()
+				.setCustomId(`${PUBLIC_PANEL_IDS.refresh}:${page}`)
+				.setLabel('Refresh')
+				.setStyle(ButtonStyle.Success),
+		),
+	);
+
+	components.push(
+		new ActionRowBuilder<ButtonBuilder>().addComponents(
+			new ButtonBuilder()
+				.setCustomId(`${PUBLIC_PANEL_IDS.open}:${page}:${quest.id}`)
+				.setLabel('Quest Details')
+				.setStyle(ButtonStyle.Primary),
+		),
+	);
+
+	return {
+		embeds: [publicQuestDetailEmbed(quest)],
+		components,
 	};
 }
 

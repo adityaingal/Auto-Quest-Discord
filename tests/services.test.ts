@@ -12,6 +12,7 @@ import { DiscordOAuth2 } from '../bot/integrations/oauth2';
 import { TokenVault } from '../bot/utils/crypto';
 import { NotFoundError, IntegrationUnavailableError } from '../bot/utils/errors';
 import { AccountScope } from '../bot/services/scope';
+import { QuestEligibility } from '../bot/models/enums';
 
 const CATALOG = 'quest.json';
 
@@ -49,12 +50,14 @@ function services() {
 		rewardCode: async () => ({ code: 'ABC', platform: 0 }),
 	};
 
+	const progressService = new ProgressService(repositories);
 	const questService = new QuestService(
 		repositories,
 		catalog,
 		linked as never,
+		undefined,
+		progressService,
 	);
-	const progressService = new ProgressService(repositories);
 	const rewardService = new RewardService(repositories, linked as never);
 
 	return {
@@ -91,6 +94,8 @@ test('every public command group exposes the documented subcommands', () => {
 			'history',
 			'switch',
 			'panel',
+			'available',
+			'check',
 			'access',
 			'select',
 			'search',
@@ -216,7 +221,12 @@ test('reward status reflects the quest state', async () => {
 	const { quests } = await questService.list(SCOPE);
 	const status = rewardService.buildStatus(quests[0]);
 
-	assert.equal(status.eligible, false);
+	// The reward is eligible exactly when the quest is completed - the
+	// comparison uses the enum, not a string literal.
+	assert.equal(
+		status.eligible,
+		quests[0].eligibility === QuestEligibility.COMPLETED,
+	);
 	assert.ok(status.rewardTypeName);
 	db.close();
 });

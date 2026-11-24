@@ -11,15 +11,19 @@ import { Services } from '../services';
 import { AccountScope } from '../services/scope';
 import { Logger } from '../utils/logger';
 import { toUserMessage } from '../utils/errors';
-import { buildQuestPages, buildQuestSelect, buildPagingRow } from '../ui/components';
-import { errorEmbed, infoEmbed, questDetailEmbed, questListEmbed, questQueueEmbed, progressEmbed } from '../ui/embeds';
+import { buildQuestPages, buildQuestSelect, buildPagingRow, buildAnnouncementRow } from '../ui/components';
+import { errorEmbed, infoEmbed, questDetailEmbed, questListEmbed, questQueueEmbed, progressEmbed, questAnnouncementEmbed, checkProgressEmbed } from '../ui/embeds';
 import { isAdmin } from './admin';
+import { NotFoundError } from '../utils/errors';
 import {
 	buildOwnerPanelResult,
 	runOwnerPanelCommand,
 } from './prefix';
 import {
 	renderQuestPanel,
+	renderPublicQuestPanel,
+	buildPublicQuestDetailPanel,
+	publicQuestPages,
 	decodeSegment,
 	decodeFilter,
 	filterPayloadQuests,
@@ -66,6 +70,15 @@ export class InteractionRouter {
 		this.register('quest:access', this.handleQuestAccess);
 		this.register('quest:panel_complete_all', this.handleCompleteAll);
 		this.register('quest:panel_filter', this.handlePanelFilter);
+		this.register('quest:check_all', this.handleCheckAll);
+		this.register('quest:pub_prev', this.handlePublicNav);
+		this.register('quest:pub_next', this.handlePublicNav);
+		this.register('quest:pub_refresh', this.handlePublicRefresh);
+		this.register('quest:pub_select', this.handlePublicSelect);
+		this.register('quest:pub_details', this.handlePublicDetails);
+		this.register('quest:pub_open', this.handlePublicOpen);
+		this.register('quest:ann_quests', this.handleAnnouncementQuests);
+		this.register('quest:ann_refresh', this.handleAnnouncementRefresh);
 		this.register('admin:maintenance_confirm', this.handleMaintenance);
 		this.register('admin:maintenance_cancel', this.handleMaintenanceCancel);
 		this.register(OWNER_PANEL_IDS.input, this.handleOwnerProfileInput);
@@ -842,6 +855,190 @@ export class InteractionRouter {
 		await interaction.update({
 			content: 'Nothing was changed.',
 			components: [],
+		});
+	}
+
+	// ------------------------------------------------- public quest browser
+
+	/**
+	 * Previous/Next of the public "Available Quests" browser. The page is
+	 * carried in the custom id; the data always comes from the authoritative
+	 * catalogue and never from a scope.
+	 */
+	private async handlePublicNav(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		const parts = interaction.customId.split(':');
+		const page = Number(parts[2] ?? 0);
+		const target = interaction.customId.startsWith('quest:pub_next:')
+			? page + 1
+			: Math.max(0, page - 1);
+
+		const payload = await renderPublicQuestPanel(services, target);
+		await interaction.update({ ...payload });
+	}
+
+	/** Refresh of the public browser - re-reads the catalogue file. */
+	private async handlePublicRefresh(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		const page = Number(interaction.customId.split(':')[2] ?? 0);
+
+		try {
+			services.catalog.reload();
+		} catch (error) {
+			// A broken catalogue must not break the panel - the cached
+			// snapshot keeps serving.
+			Logger.warn(
+				`Catalogue reload failed: ${(error as Error).message}`,
+			);
+		}
+
+		const payload = await renderPublicQuestPanel(services, page);
+		await interaction.update({ ...payload });
+	}
+
+	/** Selecting a quest in the public browser opens its detail view. */
+	private async handlePublicSelect(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isStringSelectMenu()) return;
+
+		const page = Number(interaction.customId.split(':')[2] ?? 0);
+		const questId = interaction.values[0];
+		if (!questId) return;
+
+		const detail = await services.catalog.require(questId);
+		await interaction.update({
+			...buildPublicQuestDetailPanel(detail, page),
+		});
+	}
+
+	/**
+	 * "Quest Details" on the list shows the first quest of the shown page -
+	 * the select menu picks any other quest of the page.
+	 */
+	private async handlePublicDetails(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		const page = Number(interaction.customId.split(':')[2] ?? 0);
+		const quests = await services.catalog.list();
+		const pages = publicQuestPages(quests);
+		const safePage = Math.min(Math.max(page, 0), pages.length - 1);
+		const first = pages[safePage]?.[0];
+
+		if (!first) {
+			await interaction.reply({
+				content: 'No quests are available right now.',
+				flags: MessageFlags.Ephemeral,
+			});
+			return;
+		}
+
+		const detail = await services.catalog.get(first.id);
+		if (!detail) {
+			await interaction.reply({
+				content: 'That quest is no longer in the catalogue.',
+				flags: MessageFlags.Ephemeral,
+			});
+			return;
+		}
+
+		await interaction.update({
+			...buildPublicQuestDetailPanel(detail, safePage),
+		});
+	}
+
+	/** Re-opens the detail view of one quest from the public browser. */
+	private async handlePublicOpen(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		const parts = interaction.customId.split(':');
+		const page = Number(parts[2] ?? 0);
+		const questId = parts.slice(3).join(':');
+
+		const detail = await services.catalog.require(questId);
+		await interaction.update({
+			...buildPublicQuestDetailPanel(detail, page),
+		});
+	}
+
+	/** The "Available Quests" button of an announcement. */
+	private async handleAnnouncementQuests(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		const payload = await renderPublicQuestPanel(services, 0);
+		await interaction.reply({
+			...payload,
+			flags: MessageFlags.Ephemeral,
+		});
+	}
+
+	/**
+	 * The "Refresh" button of an announcement: re-reads the quest from the
+	 * catalogue and replaces the announcement content in place.
+	 */
+	private async handleAnnouncementRefresh(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isMessageComponent()) return;
+
+		const questId = interaction.customId.split(':')[2];
+
+		try {
+			const detail = await services.catalog.require(questId);
+
+			await interaction.update({
+				embeds: [questAnnouncementEmbed(detail)],
+				components: [buildAnnouncementRow(detail)],
+			});
+		} catch (error) {
+			if (!(error instanceof NotFoundError)) throw error;
+
+			await interaction.update({
+				content: 'This quest is no longer in the catalogue.',
+				embeds: [],
+				components: [],
+			});
+		}
+	}
+
+	/**
+	 * "Check All Quest Progress": refreshes the progress of the accounts of
+	 * the **clicking user** (scope from `interaction.user.id`), recalculates
+	 * the percentages from the verified API values and replies with the
+	 * summary. It never claims a reward and never touches another scope.
+	 */
+	private async handleCheckAll(
+		interaction: Interaction,
+		services: Services,
+	): Promise<void> {
+		if (!interaction.isButton()) return;
+
+		const scope = services.scopeFor(interaction.user.id);
+
+		await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+		const summary = await services.questService.checkAll(scope);
+		await interaction.editReply({
+			embeds: [checkProgressEmbed(summary)],
 		});
 	}
 

@@ -31,9 +31,35 @@ test('migrations create the expected schema', () => {
 		'admin_logs',
 		'bot_config',
 		'oauth_states',
+		'quest_announcements',
 	]) {
 		assert.ok(tables.includes(table), `missing table ${table}`);
 	}
+
+	db.close();
+});
+
+test('migration v9 adds the announcement dedupe table on an existing install', () => {
+	const db = createDatabase();
+	db.migrate();
+
+	// Simulate a database that stopped at migration v8: drop the v9 table
+	// and forget that v9 was applied.
+	db.run('DROP TABLE quest_announcements');
+	db.run('DELETE FROM schema_migrations WHERE version = 9');
+
+	const applied = db.migrate();
+	assert.deepEqual(applied, [9]);
+
+	const tables = db
+		.all<{ name: string }>(
+			"SELECT name FROM sqlite_master WHERE type = 'table'",
+		)
+		.map((row) => row.name);
+	assert.ok(tables.includes('quest_announcements'));
+
+	// Idempotent: a second run applies nothing.
+	assert.deepEqual(db.migrate(), []);
 
 	db.close();
 });

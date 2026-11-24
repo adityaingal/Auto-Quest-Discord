@@ -130,6 +130,8 @@ Migrations live in `bot/database/index.ts`; they run at startup.
 | v5 | `whitelist_roles` | Whitelist entries get a role: `member` or `admin` |
 | v6 | `rooms` | **Rooms and room_accounts** — every user owns private rooms for their accounts |
 | v7 | `drop_per_room_webhooks` | Drops the per-room webhook columns (replaced by the single developer webhook from env) |
+| v8 | `token_owners` | Rebuilds `tokens` with `owner_user_id` (per-user token ownership) and an index on it |
+| v9 | `quest_announcements` | Public new-quest announcement dedupe: `quest_id` (PK), `first_discovered_at`, `last_detected_at`, `announcement_status`, `message_id`, `channel_id`, `updated_at` + indexes |
 
 ### Tables
 
@@ -151,6 +153,10 @@ Migrations live in `bot/database/index.ts`; they run at startup.
 - **`room_accounts`** (v6) — room_id, slot (1, 2, 3, ... continuous), token
   (encrypted), account_id, account_username, status. UNIQUE(room_id, slot).
   Removing an account closes the gap in the sequence.
+- **`quest_announcements`** (v9) — public new-quest dedupe: quest_id (PK),
+  first_discovered_at, last_detected_at, announcement_status
+  (`baseline`/`pending`/`announced`), message_id, channel_id, updated_at.
+  The row — not memory — is the dedupe, so a restart never reposts.
 
 ### Deleting data
 
@@ -182,6 +188,7 @@ Required: `DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID`, `ENCRYPTION_KEY`.
 | `WEBHOOK_URL` | no | — | Discord webhook in the developer guild; receives room events |
 | `USER_TOKEN` | no | — | Discord user token for the operator — Questor style live data and automation. ToS violation; optional |
 | `NOTIFY_CHANNEL_ID` | no | — | Channel for the notifier service |
+| `PUBLIC_QUEST_CHANNEL_ID` | no | — | Public channel for the "new quest discovered" announcement embeds. Unset = quests are tracked but never posted. Independent of `NOTIFY_CHANNEL_ID` |
 
 Render: see `render.yaml`. `NODE_ENV` must NOT be set (npm would skip the
 dev dependencies and the TypeScript build would fail).
@@ -207,6 +214,8 @@ administrative commands are owner-only prefix commands (default prefix `!`).
 | `refresh` | Refresh the quest catalogue from the source |
 | `history` | Your recent quest activity |
 | `panel [account]` | **Main interactive interface** - banner image, reward, progress bar, full Quest dropdown with pagination, action buttons |
+| `available` | Public "Available Quests" browser - catalogue data only, paginated (25 per page), detail view + official link |
+| `check` | **Check All Quest Progress** - refreshes your own accounts from Discord, recalculates %, reports Total/Available/In Progress/Completed/Expired. Never claims |
 | `access` | Connect/manage your own account via OAuth2; disconnect button |
 | `select <quest>` | Open the panel for a specific quest |
 | `search <name>` | Search the quests by name |

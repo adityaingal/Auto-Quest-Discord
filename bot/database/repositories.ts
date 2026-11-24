@@ -63,6 +63,21 @@ export type HistoryRow = {
 	created_at: string;
 };
 
+/**
+ * One row of the public new-quest announcement dedupe table. The row
+ * survives a restart, so a quest is announced exactly once.
+ */
+export type AnnouncementRow = {
+	quest_id: string;
+	first_discovered_at: string;
+	last_detected_at: string;
+	/** 'baseline' (seeded, not announced) | 'pending' | 'announced' */
+	announcement_status: string;
+	message_id: string | null;
+	channel_id: string | null;
+	updated_at: string;
+};
+
 export type RoomRow = {
 	id: number;
 	owner_user_id: string;
@@ -470,6 +485,76 @@ export class Repositories {
 		return this.db.all(
 			'SELECT quest_id, reward_name, reward_type, orb_quantity, status, claimed_at, updated_at FROM reward_records WHERE discord_user_id = ? ORDER BY updated_at DESC',
 			discordUserId,
+		);
+	}
+
+	// ------------------------------------------------- quest announcements
+
+	/**
+	 * Records that a quest was seen in the catalogue. A quest that is
+	 * already tracked only gets its `last_detected_at` bumped - the row is
+	 * never duplicated, which is what prevents a second announcement.
+	 */
+	recordAnnouncementSeen(
+		questId: string,
+		status: 'baseline' | 'pending',
+	): AnnouncementRow {
+		this.db.run(
+			`INSERT INTO quest_announcements
+				(quest_id, announcement_status, updated_at)
+			 VALUES (?, ?, datetime('now'))
+			 ON CONFLICT(quest_id) DO UPDATE SET
+				last_detected_at = datetime('now'),
+				updated_at = datetime('now')`,
+			questId,
+			status,
+		);
+
+		return this.getAnnouncement(questId) as AnnouncementRow;
+	}
+
+	getAnnouncement(questId: string): AnnouncementRow | undefined {
+		return this.db.get<AnnouncementRow>(
+			'SELECT * FROM quest_announcements WHERE quest_id = ?',
+			questId,
+		);
+	}
+
+	listAnnouncements(status?: string): AnnouncementRow[] {
+		return status
+			? this.db.all<AnnouncementRow>(
+					'SELECT * FROM quest_announcements WHERE announcement_status = ? ORDER BY first_discovered_at ASC',
+					status,
+				)
+			: this.db.all<AnnouncementRow>(
+					'SELECT * FROM quest_announcements ORDER BY first_discovered_at ASC',
+				);
+	}
+
+	countAnnouncements(): number {
+		return (
+			this.db.get<{ count: number }>(
+				'SELECT COUNT(*) AS count FROM quest_announcements',
+			)?.count ?? 0
+		);
+	}
+
+	/** Marks a pending announcement as posted, with the message it created. */
+	markAnnouncementAnnounced(
+		questId: string,
+		messageId: string,
+		channelId: string,
+	): void {
+		this.db.run(
+			`UPDATE quest_announcements SET
+				announcement_status = 'announced',
+				message_id = ?,
+				channel_id = ?,
+				updated_at = datetime('now')
+			 WHERE quest_id = ?`,
+			messageId,
+			channelId,
+			questId,
 		);
 	}
 

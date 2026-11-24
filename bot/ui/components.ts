@@ -5,7 +5,8 @@ import {
 	ComponentType,
 	StringSelectMenuBuilder,
 } from 'discord.js';
-import { QuestView } from '../models/quest';
+import { QuestDetail, QuestView } from '../models/quest';
+import { verifiedQuestUrl } from './embeds';
 
 export const PAGE_SIZE = 25;
 
@@ -112,6 +113,54 @@ export function buildMaintenanceRow(): ActionRowBuilder<ButtonBuilder> {
 			.setCustomId('admin:maintenance_cancel')
 			.setLabel('Cancel')
 			.setStyle(ButtonStyle.Secondary),
+	);
+}
+
+/**
+ * The buttons under a public new-quest announcement: the official quest
+ * link (only when the catalogue published a verified https URL), the public
+ * quest browser and a refresh of the announcement itself.
+ */
+export function buildAnnouncementRow(
+	quest: QuestDetail,
+): ActionRowBuilder<ButtonBuilder> {
+	const components: ButtonBuilder[] = [];
+	const url = verifiedQuestUrl(quest);
+
+	if (url) {
+		components.push(
+			new ButtonBuilder()
+				.setLabel('View Quest')
+				.setStyle(ButtonStyle.Link)
+				.setURL(url),
+		);
+	}
+
+	components.push(
+		new ButtonBuilder()
+			.setCustomId('quest:ann_quests')
+			.setLabel('Available Quests')
+			.setStyle(ButtonStyle.Primary),
+		new ButtonBuilder()
+			.setCustomId(`quest:ann_refresh:${quest.id}`)
+			.setLabel('Refresh')
+			.setStyle(ButtonStyle.Secondary),
+	);
+
+	return new ActionRowBuilder<ButtonBuilder>().addComponents(components);
+}
+
+/**
+ * "Check All Quest Progress" - refreshes the caller's own progress. The
+ * scope is resolved from the user that clicks it, never from the message.
+ */
+export function buildCheckAllRow(): ActionRowBuilder<ButtonBuilder> {
+	return new ActionRowBuilder<ButtonBuilder>().addComponents(
+		new ButtonBuilder()
+			.setCustomId('quest:check_all')
+			.setLabel('Check All Quest Progress')
+			.setStyle(ButtonStyle.Primary)
+			.setEmoji('🔍'),
 	);
 }
 

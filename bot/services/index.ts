@@ -16,6 +16,7 @@ import { TokenService } from './tokenService';
 import { AutoService, SessionEntry } from './autoService';
 import { RoomService } from './roomService';
 import { Notifier } from './notifier';
+import { PublicQuestNotifier } from './publicQuestNotifier';
 import { UserSession } from '../integrations/userSession';
 import { AccountScope, scopeKey } from './scope';
 import { parseWebhookUrl } from '../integrations/webhook';
@@ -40,6 +41,8 @@ export type Services = {
 	roomService: RoomService;
 	autoService: AutoService;
 	notifier: Notifier;
+	/** Detects new catalogue quests and announces them in public. */
+	publicQuestNotifier: PublicQuestNotifier;
 	client: Client;
 	/** Builds the scope of a user - it decides what the user may reach. */
 	scopeFor: (userId: string) => AccountScope;
@@ -197,13 +200,17 @@ export function createServices(
 		},
 	);
 
+	// Progress bookkeeping exists before the quest service so there is
+	// exactly one writer for quest_progress.
+	const progressService = new ProgressService(repositories);
+
 	const questService = new QuestService(
 		repositories,
 		catalog,
 		linked,
 		autoService,
+		progressService,
 	);
-	const progressService = new ProgressService(repositories);
 	const rewardService = new RewardService(repositories, linked);
 	const notificationService = new NotificationService(
 		client,
@@ -215,6 +222,23 @@ export function createServices(
 	);
 
 	const notifier = new Notifier();
+
+	// Public new-quest announcements: after every catalogue refresh the
+	// notifier looks for quests it has never seen before.
+	const publicQuestNotifier = new PublicQuestNotifier({
+		repositories,
+		catalog,
+		channelId: config.publicQuestChannelId,
+		client,
+	});
+
+	questService.onRefresh = () => {
+		void publicQuestNotifier.scan().catch((error: unknown) => {
+			Logger.warn(
+				`Post-refresh quest scan failed: ${(error as Error).message}`,
+			);
+		});
+	};
 
 	return {
 		config,
@@ -232,6 +256,7 @@ export function createServices(
 		roomService,
 		autoService,
 		notifier,
+		publicQuestNotifier,
 		client,
 		scopeFor,
 		registerCommands: null,

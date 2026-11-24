@@ -1,7 +1,7 @@
 import { Repositories } from '../database/repositories';
 import { LinkedAccountProvider } from '../integrations/linkedAccountProvider';
 import { QuestDetail, QuestView } from '../models/quest';
-import { REWARD_TYPE_NAMES } from '../models/enums';
+import { QuestEligibility, REWARD_TYPE_NAMES } from '../models/enums';
 import { ValidationError } from '../utils/errors';
 
 export type RewardStatus = {
@@ -37,7 +37,7 @@ export class RewardService {
 					? (REWARD_TYPE_NAMES[reward.type] ?? `Type ${reward.type}`)
 					: null,
 			orbQuantity: reward?.orbQuantity ?? null,
-			eligible: quest.eligibility === 'completed',
+			eligible: quest.eligibility === QuestEligibility.COMPLETED,
 			claimed: Boolean(quest.progress?.claimedAt),
 			claimedAt: quest.progress?.claimedAt ?? null,
 			redemptionLink: reward?.redemptionLink ?? null,

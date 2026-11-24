@@ -85,6 +85,8 @@ export enum QuestEligibility {
 	ENROLLED = 'enrolled',
 	IN_PROGRESS = 'in-progress',
 	COMPLETED = 'completed',
+	/** Past `expires_at` - it can no longer be started or progressed. */
+	EXPIRED = 'expired',
 	UNAVAILABLE = 'unavailable',
 }
 
@@ -93,5 +95,6 @@ export const ELIGIBILITY_LABELS: Record<QuestEligibility, string> = {
 	[QuestEligibility.ENROLLED]: 'Enrolled',
 	[QuestEligibility.IN_PROGRESS]: 'In progress',
 	[QuestEligibility.COMPLETED]: 'Completed',
+	[QuestEligibility.EXPIRED]: 'Expired',
 	[QuestEligibility.UNAVAILABLE]: 'Unavailable',
 };

@@ -274,12 +274,16 @@ async function main(): Promise<void> {
 	services.notificationService.start(
 		config.notificationIntervalMinutes,
 	);
+	services.publicQuestNotifier.start(
+		config.notificationIntervalMinutes,
+	);
 
 	Logger.info('Bot is ready.');
 
 	const shutdown = async (signal: string) => {
 		Logger.info(`Received ${signal}, shutting down...`);
 		services.notificationService.stop();
+		services.publicQuestNotifier.stop();
 		await new Promise<void>((resolve) => {
 			server.close(() => resolve());
 		});
