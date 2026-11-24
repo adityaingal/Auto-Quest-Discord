@@ -336,6 +336,9 @@ The scope is passed explicitly down to the services. There is no global
 | `NOTIFICATION_INTERVAL_MINUTES` | no | `15` | notification polling interval |
 | `PORT` | no | `3000` | HTTP port for `/health` and the OAuth2 callback |
 | `NOTIFY_CHANNEL_ID` | no | - | channel that receives the status messages |
+| `PUBLIC_QUEST_CHANNEL_ID` | no | - | public channel for the "new quest discovered" announcements |
+| `AUTO_PILOT` | no | `true` | runs the runnable quests automatically - `false` switches it off |
+| `AUTO_PILOT_INTERVAL_SECONDS` | no | `10` | seconds between two auto-pilot sweeps (minimum 10) |
 | `USER_TOKEN` | no | - | a Discord **user** token for the operator - gives access to the live quests and the automation |
 | `WEBHOOK_URL` | no | - | webhook in the developer guild - receives every room event |
 

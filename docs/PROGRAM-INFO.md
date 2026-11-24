@@ -189,6 +189,8 @@ Required: `DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID`, `ENCRYPTION_KEY`.
 | `USER_TOKEN` | no | — | Discord user token for the operator — Questor style live data and automation. ToS violation; optional |
 | `NOTIFY_CHANNEL_ID` | no | — | Channel for the notifier service |
 | `PUBLIC_QUEST_CHANNEL_ID` | no | — | Public channel for the "new quest discovered" announcement embeds. Unset = quests are tracked but never posted. Independent of `NOTIFY_CHANNEL_ID` |
+| `AUTO_PILOT` | no | `true` | Auto-pilot: runs the runnable quests of the owner's accounts automatically (a sweep every `AUTO_PILOT_INTERVAL_SECONDS`, plus an immediate run when a new quest is discovered). `false`/`0`/`off` switches it off. Results with a reason per failed quest go to `NOTIFY_CHANNEL_ID` |
+| `AUTO_PILOT_INTERVAL_SECONDS` | no | `10` | Seconds between two auto-pilot sweeps. Minimum 10 (every sweep talks to Discord) |
 
 Render: see `render.yaml`. `NODE_ENV` must NOT be set (npm would skip the
 dev dependencies and the TypeScript build would fail).

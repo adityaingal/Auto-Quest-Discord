@@ -38,6 +38,12 @@ export type PublicQuestNotifierOptions = {
 	client?: Client;
 	/** Test seam - when set, used instead of the Discord client. */
 	sender?: AnnouncementSender;
+	/**
+	 * Called with the ids of the quests that were discovered *after* the
+	 * baseline (never on the seeding scan). Used by the auto-pilot to run
+	 * a brand new quest immediately. Must not throw - errors are logged.
+	 */
+	onDiscovered?: (questIds: string[]) => void;
 };
 
 /**
@@ -136,6 +142,7 @@ export class PublicQuestNotifier {
 		// catalogue quest at once.
 		const seeding = repositories.countAnnouncements() === 0;
 		let discovered = 0;
+		const discoveredIds: string[] = [];
 
 		for (const quest of quests) {
 			const existing = repositories.getAnnouncement(quest.id);
@@ -145,7 +152,10 @@ export class PublicQuestNotifier {
 					quest.id,
 					seeding ? 'baseline' : 'pending',
 				);
-				if (!seeding) discovered++;
+				if (!seeding) {
+					discovered++;
+					discoveredIds.push(quest.id);
+				}
 			} else {
 				// Already tracked: only bump last_detected_at. The existing
 				// status (baseline/announced) is preserved by the upsert.
@@ -181,6 +191,18 @@ export class PublicQuestNotifier {
 					seeding ? ' (baseline seeded)' : ''
 				}`,
 			);
+		}
+
+		// Hand the new ids to the listener (the auto-pilot runs them right
+		// away). A listener that throws must not break the scan.
+		if (discoveredIds.length > 0) {
+			try {
+				this.options.onDiscovered?.(discoveredIds);
+			} catch (error) {
+				Logger.warn(
+					`New-quest listener failed: ${(error as Error).message}`,
+				);
+			}
 		}
 
 		return { discovered, announced, failed, seeded: seeding };

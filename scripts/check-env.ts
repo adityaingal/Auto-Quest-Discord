@@ -16,6 +16,8 @@ const OPTIONAL = [
 	'LOG_LEVEL',
 	'NOTIFICATION_INTERVAL_MINUTES',
 	'PUBLIC_QUEST_CHANNEL_ID',
+	'AUTO_PILOT',
+	'AUTO_PILOT_INTERVAL_SECONDS',
 	'PORT',
 	'WEBHOOK_URL',
 ];
@@ -70,6 +72,13 @@ try {
 	console.log(`  oauth2 enabled : ${Boolean(config.clientSecret && config.redirectUri)}`);
 	console.log(`  encryption key : ${config.encryptionKey.length} bytes`);
 	console.log(`  port           : ${config.port}`);
+	console.log(
+		`  auto-pilot     : ${
+			config.autoPilotEnabled
+				? `on (every ${config.autoPilotIntervalSeconds}s)`
+				: 'off'
+		}`,
+	);
 } catch (error) {
 	console.log(`config error: ${error.message}`);
 }

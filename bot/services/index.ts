@@ -17,6 +17,7 @@ import { AutoService, SessionEntry } from './autoService';
 import { RoomService } from './roomService';
 import { Notifier } from './notifier';
 import { PublicQuestNotifier } from './publicQuestNotifier';
+import { AutoPilot } from './autoPilot';
 import { UserSession } from '../integrations/userSession';
 import { AccountScope, scopeKey } from './scope';
 import { parseWebhookUrl } from '../integrations/webhook';
@@ -43,6 +44,8 @@ export type Services = {
 	notifier: Notifier;
 	/** Detects new catalogue quests and announces them in public. */
 	publicQuestNotifier: PublicQuestNotifier;
+	/** Runs the runnable quests of the operator scope without a command. */
+	autoPilot: AutoPilot;
 	client: Client;
 	/** Builds the scope of a user - it decides what the user may reach. */
 	scopeFor: (userId: string) => AccountScope;
@@ -223,6 +226,16 @@ export function createServices(
 
 	const notifier = new Notifier();
 
+	// Auto-pilot: sweeps the runnable quests of the operator scope on a
+	// timer and immediately after a newly discovered quest. The scope is
+	// the owner's - a user's commands and their scopes never change.
+	const autoPilot = new AutoPilot({
+		auto: autoService,
+		notifier,
+		enabled: config.autoPilotEnabled,
+		scope: scopeFor(config.ownerIds[0] ?? 'operator'),
+	});
+
 	// Public new-quest announcements: after every catalogue refresh the
 	// notifier looks for quests it has never seen before.
 	const publicQuestNotifier = new PublicQuestNotifier({
@@ -230,6 +243,18 @@ export function createServices(
 		catalog,
 		channelId: config.publicQuestChannelId,
 		client,
+		// A brand new quest is run right away - no waiting for the next
+		// sweep. The sweep itself drops the tick when a queue is running.
+		onDiscovered: (questIds) => {
+			Logger.info(
+				`Auto-pilot triggered by new quest(s): ${questIds.join(', ')}`,
+			);
+			void autoPilot.sweep('new-quest').catch((error: unknown) => {
+				Logger.warn(
+					`New-quest auto-pilot sweep failed: ${(error as Error).message}`,
+				);
+			});
+		},
 	});
 
 	questService.onRefresh = () => {
@@ -257,6 +282,7 @@ export function createServices(
 		autoService,
 		notifier,
 		publicQuestNotifier,
+		autoPilot,
 		client,
 		scopeFor,
 		registerCommands: null,

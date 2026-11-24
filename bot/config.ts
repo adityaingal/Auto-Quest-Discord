@@ -35,6 +35,15 @@ export type Config = {
 	 * never posted. Does not change NOTIFY_CHANNEL_ID (status messages).
 	 */
 	publicQuestChannelId: string | null;
+	/**
+	 * Auto-pilot: run the runnable quests of the operator scope without a
+	 * command (periodic sweep + immediate sweep on a newly discovered quest).
+	 * AUTO_PILOT=false turns it off. Default: on.
+	 */
+	autoPilotEnabled: boolean;
+	/** Seconds between two auto-pilot sweeps. AUTO_PILOT_INTERVAL_SECONDS,
+	 *  default 10, minimum 10 (every sweep talks to Discord). */
+	autoPilotIntervalSeconds: number;
 };
 
 function readDotEnv(
@@ -122,6 +131,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		.map((id) => id.trim())
 		.filter(Boolean);
 
+	// Auto-pilot is on unless it is explicitly switched off, and a sweep
+	// never runs faster than every 10 seconds (each sweep talks to Discord).
+	const autoPilotEnabled = !/^(false|0|off|no)$/i.test(
+		env.AUTO_PILOT?.trim() ?? '',
+	);
+
+	const rawSweep = Number(env.AUTO_PILOT_INTERVAL_SECONDS ?? 10);
+	const autoPilotIntervalSeconds =
+		Number.isFinite(rawSweep) && rawSweep > 0
+			? Math.max(10, Math.floor(rawSweep))
+			: 10;
+
 	return {
 		botToken: botToken as string,
 		clientId: clientId as string,
@@ -145,5 +166,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		webhookUrl: env.WEBHOOK_URL?.trim() || null,
 		publicQuestChannelId:
 			env.PUBLIC_QUEST_CHANNEL_ID?.trim() || null,
+		autoPilotEnabled,
+		autoPilotIntervalSeconds,
 	};
 }

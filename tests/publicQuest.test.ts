@@ -317,6 +317,37 @@ test('a newly discovered quest is announced exactly once', async (t) => {
 	assert.equal(sent.length, 1, 'a restart must not repost');
 });
 
+test('a discovery is reported to the listener, the baseline is not', async (t) => {
+	const { file, catalog } = tempCatalogue(t, ['q1']);
+	const db = new Database(':memory:');
+	t.after(() => db.close());
+	db.migrate();
+	const repositories = new Repositories(db);
+
+	const seen: string[][] = [];
+	const notifier = new PublicQuestNotifier({
+		repositories,
+		catalog,
+		channelId: 'channel-1',
+		sender: async (payload) => ({
+			id: `msg-${payload.embeds.length}`,
+			channelId: 'channel-1',
+		}),
+		onDiscovered: (ids) => seen.push(ids),
+	});
+
+	await notifier.scan(); // baseline - must not trigger the listener
+	assert.deepEqual(seen, []);
+
+	writeCatalogue(file, ['q1', 'brand-new']);
+	await notifier.scan();
+	assert.deepEqual(seen, [['brand-new']]);
+
+	// No new quest, no call.
+	await notifier.scan();
+	assert.equal(seen.length, 1);
+});
+
 test('a rate limited announcement stays pending and is retried later', async (t) => {
 	const { file, catalog } = tempCatalogue(t, ['q1']);
 	const db = new Database(':memory:');

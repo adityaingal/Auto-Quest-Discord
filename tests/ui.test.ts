@@ -346,6 +346,46 @@ test('the config loads and defaults every optional value', () => {
 	assert.equal(config.notificationIntervalMinutes, 15);
 	assert.equal(config.databasePath, 'data/quest-bot.sqlite');
 	assert.equal(config.encryptionKey.length, 32);
+	// Auto-pilot: on by default, one sweep every 10 seconds.
+	assert.equal(config.autoPilotEnabled, true);
+	assert.equal(config.autoPilotIntervalSeconds, 10);
+});
+
+test('the auto-pilot can be switched off and its interval changed', () => {
+	const base = {
+		DISCORD_BOT_TOKEN: 'token',
+		DISCORD_CLIENT_ID: '123',
+		ENCRYPTION_KEY: 'a-secret-that-is-long-enough',
+		DOTENV_PATH: '.env.does-not-exist',
+	} as NodeJS.ProcessEnv;
+
+	const off = loadConfig({ ...base, AUTO_PILOT: 'false' });
+	assert.equal(off.autoPilotEnabled, false);
+
+	const offZero = loadConfig({ ...base, AUTO_PILOT: '0' });
+	assert.equal(offZero.autoPilotEnabled, false);
+
+	const on = loadConfig({ ...base, AUTO_PILOT: 'true' });
+	assert.equal(on.autoPilotEnabled, true);
+
+	const slower = loadConfig({
+		...base,
+		AUTO_PILOT_INTERVAL_SECONDS: '30',
+	});
+	assert.equal(slower.autoPilotIntervalSeconds, 30);
+
+	// The floor is 10 seconds - every sweep talks to Discord.
+	const tooFast = loadConfig({
+		...base,
+		AUTO_PILOT_INTERVAL_SECONDS: '3',
+	});
+	assert.equal(tooFast.autoPilotIntervalSeconds, 10);
+
+	const garbage = loadConfig({
+		...base,
+		AUTO_PILOT_INTERVAL_SECONDS: 'soon',
+	});
+	assert.equal(garbage.autoPilotIntervalSeconds, 10);
 });
 
 test('the config parses several owners, comma separated', () => {

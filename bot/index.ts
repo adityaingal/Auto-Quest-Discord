@@ -277,6 +277,7 @@ async function main(): Promise<void> {
 	services.publicQuestNotifier.start(
 		config.notificationIntervalMinutes,
 	);
+	services.autoPilot.start(config.autoPilotIntervalSeconds);
 
 	Logger.info('Bot is ready.');
 
@@ -284,6 +285,7 @@ async function main(): Promise<void> {
 		Logger.info(`Received ${signal}, shutting down...`);
 		services.notificationService.stop();
 		services.publicQuestNotifier.stop();
+		services.autoPilot.stop();
 		await new Promise<void>((resolve) => {
 			server.close(() => resolve());
 		});
