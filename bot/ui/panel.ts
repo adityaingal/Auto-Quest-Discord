@@ -22,7 +22,7 @@ import {
 	publicQuestListEmbed,
 	verifiedQuestUrl,
 } from './embeds';
-import { buildCheckAllRow } from './components';
+import { checkAllButton } from './components';
 import { formatDuration } from './theme';
 
 export const PANEL_PAGE = 25;
@@ -715,11 +715,12 @@ export function actionButtons(
 }
 
 /**
- * The button that runs every quest the account of the user offers. Only the
- * owner can operate the automation, and it is only available when the user
- * has an account configured. The filter decides which quests are run.
+ * The run-buttons of the panel: "Complete All Quests" (owner automation)
+ * and "Check All Quest Progress" share **one row** - Discord rejects a
+ * message with more than five component rows, and the panel already uses
+ * four others (actions, filters, select menu, pagination).
  */
-export function completeAllButton(
+export function automationRow(
 	account = '-',
 	filter: QuestFilter = 'all',
 ): ActionRowBuilder<ButtonBuilder> {
@@ -729,6 +730,7 @@ export function completeAllButton(
 			.setLabel('Complete All Quests')
 			.setStyle(ButtonStyle.Success)
 			.setEmoji('⚡'),
+		checkAllButton(),
 	);
 }
 
@@ -753,8 +755,7 @@ export function buildQuestPanel(
 		components: [
 			actionButtons(quest, account),
 			filterButtons(filter, account),
-			completeAllButton(account, filter),
-			buildCheckAllRow(),
+			automationRow(account, filter),
 			questSelectMenu(filtered, quest.id, safePage, account, filter),
 			...(totalPages > 1
 				? [navButtons(safePage, totalPages, quest.id, account, filter)]

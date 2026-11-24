@@ -153,15 +153,15 @@ export function buildAnnouncementRow(
 /**
  * "Check All Quest Progress" - refreshes the caller's own progress. The
  * scope is resolved from the user that clicks it, never from the message.
+ * Returned as a bare button so callers can share a row with another
+ * button (Discord allows at most five component rows per message).
  */
-export function buildCheckAllRow(): ActionRowBuilder<ButtonBuilder> {
-	return new ActionRowBuilder<ButtonBuilder>().addComponents(
-		new ButtonBuilder()
-			.setCustomId('quest:check_all')
-			.setLabel('Check All Quest Progress')
-			.setStyle(ButtonStyle.Primary)
-			.setEmoji('🔍'),
-	);
+export function checkAllButton(): ButtonBuilder {
+	return new ButtonBuilder()
+		.setCustomId('quest:check_all')
+		.setLabel('Check All Quest Progress')
+		.setStyle(ButtonStyle.Primary)
+		.setEmoji('🔍');
 }
 
 export function selectComponentType(): ComponentType {

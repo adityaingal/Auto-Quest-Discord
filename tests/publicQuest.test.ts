@@ -24,6 +24,7 @@ import { QuestEligibility } from '../bot/models/enums';
 import { AccountScope } from '../bot/services/scope';
 import {
 	buildPublicQuestPanel,
+	buildQuestPanel,
 	publicQuestPages,
 	PUBLIC_PANEL_IDS,
 } from '../bot/ui/panel';
@@ -413,6 +414,54 @@ test('the public browser paginates beyond 25 quests', () => {
 		const slice = publicQuestPages(quests)[page];
 		assert.ok(slice.length <= 25);
 	}
+});
+
+test('no panel ever exceeds the five component rows Discord allows', async (t) => {
+	const dir = mkdtempSync(join(tmpdir(), 'quest-rows-'));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const file = join(dir, 'quest.json');
+	// 30 quests -> two pages -> the pagination row is present (worst case
+	// for the panel: six rows before the fix that merged the run buttons).
+	writeFileSync(
+		file,
+		JSON.stringify({
+			quests: Array.from({ length: 30 }, (_, index) =>
+				shape(`row-${index}`),
+			),
+		}),
+	);
+	const catalog = new CatalogProvider(file);
+	const detail = await catalog.require('row-0');
+	const quests = await catalog.list();
+
+	const rowIds = (payload: {
+		components: { toJSON(): { components: unknown[] } }[];
+	}) =>
+		payload.components.flatMap((row) =>
+			(row.toJSON().components as { custom_id?: string }[]).map(
+				(component) => component.custom_id ?? '',
+			),
+		);
+
+	const panel = buildQuestPanel(detail, quests, 0, null, 'all');
+	assert.ok(
+		panel.components.length <= 5,
+		`the quest panel must not send more than 5 rows (sent ${panel.components.length})`,
+	);
+
+	const ids = rowIds(panel);
+	assert.ok(
+		ids.includes('quest:check_all'),
+		'the check-all button stays on the panel',
+	);
+	assert.ok(
+		ids.some((id) => id.startsWith('quest:panel_complete_all:')),
+		'the complete-all button stays on the panel',
+	);
+
+	// The public browser and the announcement must respect the limit too.
+	const publicPanel = buildPublicQuestPanel(quests, 0);
+	assert.ok(publicPanel.components.length <= 5);
 });
 
 test('the public panel shows availability and expired states', () => {
