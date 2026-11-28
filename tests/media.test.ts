@@ -59,6 +59,10 @@ test('relative Discord assets are expanded with the official CDN', () => {
 		verifiedMediaUrl('//assets/hero.webp', 'image'),
 		'https://cdn.discordapp.com/assets/hero.webp',
 	);
+	assert.equal(
+		verifiedMediaUrl('quests/1432436088508780675/hero.jpg', 'image'),
+		'https://cdn.discordapp.com/quests/1432436088508780675/hero.jpg',
+	);
 });
 
 test('only https Discord media urls survive validation', () => {

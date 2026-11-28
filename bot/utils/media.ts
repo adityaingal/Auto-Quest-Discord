@@ -35,7 +35,14 @@ export function verifiedMediaUrl(
 	if (!value) return null;
 
 	try {
-		const url = new URL(value.startsWith('/') ? `${CDN_BASE}${value.replace(/^\/+/, '')}` : value);
+		// Catalogue assets are relative CDN paths, usually without a leading
+		// slash ("quests/<id>/hero.jpg"). Only values with an explicit scheme
+		// are treated as absolute; everything else is resolved on Discord's
+		// own CDN and then validated below.
+		const absolute = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value);
+		const url = new URL(
+			absolute ? value : `${CDN_BASE}${value.replace(/^\/+/, '')}`,
+		);
 
 		if (url.protocol !== 'https:') return null;
 		if (!OFFICIAL_HOSTS.has(url.hostname.toLowerCase())) return null;
