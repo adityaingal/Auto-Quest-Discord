@@ -76,6 +76,53 @@ export type AnnouncementRow = {
 	message_id: string | null;
 	channel_id: string | null;
 	updated_at: string;
+	/** Added by migration v10 - nullable on rows created by v9. */
+	announced_at: string | null;
+	reconcile_nonce: string | null;
+	attempts: number;
+	last_error: string | null;
+};
+
+export type QuestMetadataRow = {
+	quest_id: string;
+	name: string | null;
+	description: string | null;
+	image_url: string | null;
+	video_url: string | null;
+	thumbnail_url: string | null;
+	rewards: string | null;
+	official_url: string | null;
+	availability: string | null;
+	expires_at: string | null;
+	first_detected_at: string;
+	last_updated_at: string;
+};
+
+export type GuildMembershipRow = {
+	discord_user_id: string;
+	guild_id: string;
+	is_member: number;
+	joined_at: string | null;
+	left_at: string | null;
+	last_verified_at: string | null;
+	last_error: string | null;
+	updated_at: string;
+};
+
+/** Singleton row - the singleton id is what makes the state atomic. */
+export type WebhookBackupStateRow = {
+	id: number;
+	hash: string | null;
+	content_hash: string | null;
+	size: number;
+	message_id: string | null;
+	attachment_url: string | null;
+	generated_at: string | null;
+	source_modified_at: string | null;
+	last_attempt_at: string | null;
+	last_success_at: string | null;
+	last_error: string | null;
+	updated_at: string;
 };
 
 export type RoomRow = {
@@ -550,12 +597,317 @@ export class Repositories {
 				announcement_status = 'announced',
 				message_id = ?,
 				channel_id = ?,
+				announced_at = datetime('now'),
+				last_error = NULL,
 				updated_at = datetime('now')
 			 WHERE quest_id = ?`,
 			messageId,
 			channelId,
 			questId,
 		);
+	}
+
+	/**
+	 * Stores the random nonce that is written into the announcement footer.
+	 * It lets a later scan find a message that was sent successfully but
+	 * whose database write failed, without posting a duplicate.
+	 */
+	beginAnnouncementAttempt(questId: string, nonce: string): void {
+		this.db.run(
+			`UPDATE quest_announcements SET
+				reconcile_nonce = ?,
+				attempts = attempts + 1,
+				last_error = NULL,
+				updated_at = datetime('now')
+			 WHERE quest_id = ?`,
+			nonce,
+			questId,
+		);
+	}
+
+	markAnnouncementFailure(questId: string, error: string): void {
+		this.db.run(
+			`UPDATE quest_announcements SET
+				attempts = attempts + 1,
+				last_error = ?,
+				updated_at = datetime('now')
+			 WHERE quest_id = ?`,
+			error.slice(0, 500),
+			questId,
+		);
+	}
+
+	findAnnouncementByNonce(nonce: string): AnnouncementRow | undefined {
+		return this.db.get<AnnouncementRow>(
+			'SELECT * FROM quest_announcements WHERE reconcile_nonce = ? LIMIT 1',
+			nonce,
+		);
+	}
+
+	/**
+	 * Re-inserts announcement rows that a restored snapshot does not have.
+	 * This is what makes the announcement history monotonic across restores.
+	 */
+	restoreAnnouncementHistory(rows: AnnouncementRow[]): number {
+		let restored = 0;
+
+		this.db.transaction(() => {
+			for (const row of rows) {
+				const result = this.db.run(
+					`INSERT OR IGNORE INTO quest_announcements
+						(quest_id, first_discovered_at, last_detected_at,
+						 announcement_status, message_id, channel_id, updated_at,
+						 announced_at, reconcile_nonce, attempts, last_error)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					row.quest_id,
+					row.first_discovered_at,
+					row.last_detected_at,
+					row.announcement_status,
+					row.message_id,
+					row.channel_id,
+					row.updated_at,
+					row.announced_at,
+					row.reconcile_nonce,
+					row.attempts ?? 0,
+					row.last_error,
+				);
+				restored += Number(result.changes ?? 0);
+			}
+		});
+
+		return restored;
+	}
+
+	// ------------------------------------------------------- quest metadata
+
+	/**
+	 * Stores the public facts of a quest seen by the monitor. The first
+	 * detection time is never overwritten, so the record works as history
+	 * even when a catalogue entry is edited later.
+	 */
+	saveQuestMetadata(row: {
+		quest_id: string;
+		name: string | null;
+		description: string | null;
+		image_url: string | null;
+		video_url: string | null;
+		thumbnail_url: string | null;
+		rewards: string | null;
+		official_url: string | null;
+		availability: string | null;
+		expires_at: string | null;
+	}): void {
+		this.db.run(
+			`INSERT INTO quest_metadata
+				(quest_id, name, description, image_url, video_url, thumbnail_url,
+				 rewards, official_url, availability, expires_at,
+				 first_detected_at, last_updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+			 ON CONFLICT(quest_id) DO UPDATE SET
+				name = excluded.name,
+				description = excluded.description,
+				image_url = excluded.image_url,
+				video_url = excluded.video_url,
+				thumbnail_url = excluded.thumbnail_url,
+				rewards = excluded.rewards,
+				official_url = excluded.official_url,
+				availability = excluded.availability,
+				expires_at = excluded.expires_at,
+				last_updated_at = datetime('now')`,
+			row.quest_id,
+			row.name,
+			row.description,
+			row.image_url,
+			row.video_url,
+			row.thumbnail_url,
+			row.rewards,
+			row.official_url,
+			row.availability,
+			row.expires_at,
+		);
+	}
+
+	getQuestMetadata(questId: string): QuestMetadataRow | undefined {
+		return this.db.get<QuestMetadataRow>(
+			'SELECT * FROM quest_metadata WHERE quest_id = ?',
+			questId,
+		);
+	}
+
+	countQuestMetadata(): number {
+		return (
+			this.db.get<{ count: number }>(
+				'SELECT COUNT(*) AS count FROM quest_metadata',
+			)?.count ?? 0
+		);
+	}
+
+	listQuestMetadata(): QuestMetadataRow[] {
+		return this.db.all<QuestMetadataRow>(
+			'SELECT * FROM quest_metadata ORDER BY first_detected_at ASC',
+		);
+	}
+
+	restoreQuestMetadata(rows: QuestMetadataRow[]): number {
+		let restored = 0;
+
+		this.db.transaction(() => {
+			for (const row of rows) {
+				const result = this.db.run(
+					`INSERT OR IGNORE INTO quest_metadata
+						(quest_id, name, description, image_url, video_url,
+						 thumbnail_url, rewards, official_url, availability,
+						 expires_at, first_detected_at, last_updated_at)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					row.quest_id,
+					row.name,
+					row.description,
+					row.image_url,
+					row.video_url,
+					row.thumbnail_url,
+					row.rewards,
+					row.official_url,
+					row.availability,
+					row.expires_at,
+					row.first_detected_at,
+					row.last_updated_at,
+				);
+				restored += Number(result.changes ?? 0);
+			}
+		});
+
+		return restored;
+	}
+
+	// ------------------------------------------------------ guild membership
+
+	/**
+	 * Records an authoritative membership result. `is_member` is written
+	 * only by a real answer from Discord (or an explicit gateway event) -
+	 * an API failure never silently marks somebody as a member.
+	 */
+	recordMembership(row: {
+		discord_user_id: string;
+		guild_id: string;
+		is_member: boolean;
+		joined_at?: string | null;
+		last_error?: string | null;
+	}): void {
+		this.db.run(
+			`INSERT INTO guild_membership
+				(discord_user_id, guild_id, is_member, joined_at, left_at,
+				 last_verified_at, last_error, updated_at)
+			 VALUES (?, ?, ?, ?, CASE WHEN ? = 0 THEN datetime('now') ELSE NULL END,
+				 CASE WHEN ? = 1 THEN datetime('now') ELSE NULL END, ?, datetime('now'))
+			 ON CONFLICT(discord_user_id, guild_id) DO UPDATE SET
+				is_member = excluded.is_member,
+				joined_at = CASE WHEN excluded.is_member = 1
+					THEN COALESCE(excluded.joined_at, guild_membership.joined_at)
+					ELSE guild_membership.joined_at END,
+				left_at = CASE WHEN excluded.is_member = 0
+					THEN datetime('now') ELSE NULL END,
+				last_verified_at = CASE WHEN excluded.is_member = 1
+					THEN datetime('now') ELSE guild_membership.last_verified_at END,
+				last_error = excluded.last_error,
+				updated_at = datetime('now')`,
+			row.discord_user_id,
+			row.guild_id,
+			row.is_member ? 1 : 0,
+			row.joined_at ?? null,
+			row.is_member ? 1 : 0,
+			row.is_member ? 1 : 0,
+			row.last_error ?? null,
+		);
+	}
+
+	/**
+	 * Records an uncertain check without changing membership. A 403, 429,
+	 * timeout or unavailable guild must never be interpreted as a leave.
+	 */
+	recordMembershipError(
+		discordUserId: string,
+		guildId: string,
+		error: string,
+	): void {
+		this.db.run(
+			`INSERT INTO guild_membership
+				(discord_user_id, guild_id, is_member, last_error, updated_at)
+			 VALUES (?, ?, 0, ?, datetime('now'))
+			 ON CONFLICT(discord_user_id, guild_id) DO UPDATE SET
+				last_error = excluded.last_error,
+				updated_at = datetime('now')`,
+			discordUserId,
+			guildId,
+			error.slice(0, 500),
+		);
+	}
+
+	getMembership(
+		discordUserId: string,
+		guildId: string,
+	): GuildMembershipRow | undefined {
+		return this.db.get<GuildMembershipRow>(
+			'SELECT * FROM guild_membership WHERE discord_user_id = ? AND guild_id = ?',
+			discordUserId,
+			guildId,
+		);
+	}
+
+	listMembers(guildId: string): GuildMembershipRow[] {
+		return this.db.all<GuildMembershipRow>(
+			'SELECT * FROM guild_membership WHERE guild_id = ? AND is_member = 1 ORDER BY updated_at ASC',
+			guildId,
+		);
+	}
+
+	// ------------------------------------------------------- webhook backup
+
+	getWebhookBackupState(): WebhookBackupStateRow {
+		this.db.run(
+			`INSERT OR IGNORE INTO webhook_backup_state (id, size) VALUES (1, 0)`,
+		);
+
+		return this.db.get<WebhookBackupStateRow>(
+			'SELECT * FROM webhook_backup_state WHERE id = 1',
+		) as WebhookBackupStateRow;
+	}
+
+	/**
+	 * Writes one atomic state row. Only the supplied fields change, so a
+	 * failed upload never overwrites the hash of the last successful one.
+	 */
+	saveWebhookBackupState(fields: {
+		hash?: string | null;
+		content_hash?: string | null;
+		size?: number;
+		message_id?: string | null;
+		attachment_url?: string | null;
+		generated_at?: string | null;
+		source_modified_at?: string | null;
+		last_attempt_at?: string;
+		last_success_at?: string;
+		last_error?: string | null;
+	}): WebhookBackupStateRow {
+		this.getWebhookBackupState();
+
+		const sets: string[] = [];
+		const params: unknown[] = [];
+
+		for (const [key, value] of Object.entries(fields)) {
+			if (value === undefined) continue;
+			sets.push(`${key} = ?`);
+			params.push(value);
+		}
+
+		if (sets.length > 0) {
+			sets.push("updated_at = datetime('now')");
+			this.db.run(
+				`UPDATE webhook_backup_state SET ${sets.join(', ')} WHERE id = 1`,
+				...params,
+			);
+		}
+
+		return this.getWebhookBackupState();
 	}
 
 	// --------------------------------------------------- notification cfg

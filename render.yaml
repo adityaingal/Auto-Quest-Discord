@@ -24,6 +24,32 @@ services:
         value: INFO
       - key: NOTIFICATION_INTERVAL_MINUTES
         value: 15
+      - key: QUEST_MONITORING_ENABLED
+        value: 'true'
+      - key: QUEST_MONITOR_INTERVAL_MINUTES
+        value: '15'
+      - key: QUEST_IMAGES_ENABLED
+        value: 'true'
+      - key: QUEST_VIDEOS_ENABLED
+        value: 'true'
+      - key: QUEST_MEDIA_FALLBACK
+        value: neutral
+      - key: REQUIRED_GUILD_ID
+        sync: false
+      - key: REQUIRED_GUILD_INVITE
+        sync: false
+      - key: MEMBERSHIP_VERIFICATION_ENABLED
+        sync: false
+      - key: MEMBERSHIP_VERIFY_INTERVAL_MINUTES
+        value: '60'
+      - key: MEMBERSHIP_MEMBER_EVENTS
+        value: 'false'
+      - key: WEBHOOK_BACKUP_ENABLED
+        sync: false
+      - key: WEBHOOK_BACKUP_INTERVAL_MINUTES
+        value: '360'
+      - key: WEBHOOK_BACKUP_MAX_MB
+        value: '8'
       - key: DISCORD_BOT_TOKEN
         sync: false
       - key: DISCORD_CLIENT_ID

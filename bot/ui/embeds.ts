@@ -493,6 +493,45 @@ export function verifiedQuestUrl(
 	}
 }
 
+/**
+ * An invite is displayed only when it is an https Discord invite. A plain
+ * string is always safe as text, but it never becomes a clickable button
+ * unless it passes this check.
+ */
+export function verifiedInviteUrl(raw: string | null | undefined): string | null {
+	const value = raw?.trim();
+	if (!value) return null;
+
+	try {
+		const url = new URL(value);
+		if (url.protocol !== 'https:') return null;
+
+		const host = url.hostname.toLowerCase();
+		if (host === 'discord.gg') return url.toString();
+		if (
+			(host === 'discord.com' || host === 'www.discord.com') &&
+			url.pathname.startsWith('/invite/')
+		) {
+			return url.toString();
+		}
+
+		return null;
+	} catch {
+		return null;
+	}
+}
+
+export const ANNOUNCEMENT_BRAND =
+	'Quest Completer | Automatic Quest Monitor';
+
+export type AnnouncementMediaOptions = {
+	imagesEnabled?: boolean;
+	videosEnabled?: boolean;
+	fallback?: 'neutral' | 'omit';
+	/** Random id used to reconcile a message whose DB write failed. */
+	nonce?: string;
+};
+
 function platformText(quest: QuestView): string {
 	return (
 		quest.platforms
@@ -505,7 +544,10 @@ function platformText(quest: QuestView): string {
  * The public "new quest" announcement. It only carries catalogue data -
  * never a token, an account, a user id or any private progress.
  */
-export function questAnnouncementEmbed(quest: QuestDetail): EmbedBuilder {
+export function questAnnouncementEmbed(
+	quest: QuestDetail,
+	options: AnnouncementMediaOptions = {},
+): EmbedBuilder {
 	const reward = quest.rewards[0] ?? null;
 	const rewardText = reward
 		? `${reward.name}${reward.orbQuantity ? ` - ${reward.orbQuantity} Orbs` : ''}`
@@ -525,42 +567,65 @@ export function questAnnouncementEmbed(quest: QuestDetail): EmbedBuilder {
 		.filter(Boolean)
 		.join(' - ');
 
+	const images = options.imagesEnabled !== false;
+	const videos = options.videosEnabled !== false;
+	const image = images ? quest.imageUrl ?? quest.thumbnailUrl : null;
+	const video = videos ? quest.videoUrl : null;
+	const fields: { name: string; value: string; inline?: boolean }[] = [
+		{ name: 'Reward', value: rewardText, inline: true },
+		{
+			name: 'Platform',
+			value: platformText(quest),
+			inline: true,
+		},
+		{
+			name: 'Availability',
+			value: eligibilityLabel(quest),
+			inline: true,
+		},
+		{ name: 'Task requirements', value: requirements },
+		{
+			name: 'Expires',
+			value: quest.expiresAt
+				? `${new Date(quest.expiresAt).toUTCString()} (${relativeTime(
+						quest.expiresAt,
+					)})`
+				: 'unknown',
+			inline: true,
+		},
+	];
+
+	if (video) {
+		fields.push({
+			name: 'Promotional video',
+			value: `[Watch the official video](${video})`,
+		});
+	} else if (!image && options.fallback !== 'omit') {
+		// Factual, not fabricated: Discord published no usable media here.
+		fields.push({
+			name: 'Media',
+			value: 'No promotional media was published for this quest.',
+		});
+	}
+
+	const footer = [
+		ANNOUNCEMENT_BRAND,
+		`Quest ID ${quest.id} - source: ${quest.source}${quest.live ? ' (live)' : ''}`,
+		options.nonce ? `ref ${options.nonce}` : null,
+	]
+		.filter(Boolean)
+		.join(' | ');
+
 	const embed = new EmbedBuilder()
 		.setColor(STATUS_COLOR[quest.eligibility])
 		.setTitle(`NEW QUEST: ${quest.name}`)
 		.setDescription(promo)
-		.addFields(
-			{ name: 'Reward', value: rewardText, inline: true },
-			{
-				name: 'Platform',
-				value: platformText(quest),
-				inline: true,
-			},
-			{
-				name: 'Availability',
-				value: eligibilityLabel(quest),
-				inline: true,
-			},
-			{ name: 'Task requirements', value: requirements },
-			{
-				name: 'Expires',
-				value: quest.expiresAt
-					? `${new Date(quest.expiresAt).toUTCString()} (${relativeTime(
-							quest.expiresAt,
-						)})`
-					: 'unknown',
-				inline: true,
-			},
-		)
-		.setFooter({
-			text: `Quest ID ${quest.id} - source: ${quest.source}${
-				quest.live ? ' (live)' : ''
-			}`,
-		})
+		.addFields(fields)
+		.setFooter({ text: footer })
 		.setTimestamp();
 
-	if (quest.imageUrl) {
-		embed.setImage(quest.imageUrl);
+	if (image) {
+		embed.setImage(image);
 	}
 
 	const url = verifiedQuestUrl(quest);
@@ -569,6 +634,54 @@ export function questAnnouncementEmbed(quest: QuestDetail): EmbedBuilder {
 	}
 
 	return embed;
+}
+
+/** Metadata that travels with an uploaded SQLite snapshot. */
+export function webhookBackupEmbed(input: {
+	hash: string;
+	size: number;
+	generatedAt: string;
+	schemaVersion: number;
+}): EmbedBuilder {
+	return new EmbedBuilder()
+		.setColor(COLORS.info)
+		.setTitle('DATABASE SNAPSHOT')
+		.setDescription(
+			'Encrypted database snapshot for the Quest Completer bot. ' +
+				'It contains account tokens - do not share it.',
+		)
+		.addFields(
+			{ name: 'SHA-256', value: `\`${input.hash}\``, inline: false },
+			{ name: 'Size (bytes)', value: String(input.size), inline: true },
+			{ name: 'Generated at', value: input.generatedAt, inline: true },
+			{ name: 'Schema version', value: String(input.schemaVersion), inline: true },
+		)
+		.setFooter({ text: ANNOUNCEMENT_BRAND })
+		.setTimestamp();
+}
+
+/** Shown when DM access is blocked by the mandatory guild membership rule. */
+export function membershipRequiredEmbed(
+	inviteUrl: string | null,
+): EmbedBuilder {
+	const invite = verifiedInviteUrl(inviteUrl);
+
+	return new EmbedBuilder()
+		.setColor(COLORS.warning)
+		.setTitle('SERVER MEMBERSHIP REQUIRED')
+		.setDescription(
+			`You must join **the support server** before you can use the bot in DMs.${
+				invite ? `\n\nJoin: ${invite}` : '\n\nAsk the bot owner for an invite.'
+			}`,
+		)
+		.addFields({
+			name: 'Why?',
+			value:
+				'DM commands are limited to members of the community server. ' +
+				'Joining once is enough - leaving and rejoining is detected automatically.',
+		})
+		.setFooter({ text: ANNOUNCEMENT_BRAND })
+		.setTimestamp();
 }
 
 /** One line of the public quest list, kept short enough for 25 per embed. */

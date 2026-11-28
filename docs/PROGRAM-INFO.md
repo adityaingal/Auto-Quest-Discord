@@ -48,6 +48,9 @@ Scope  (bot/services/scope.ts)   <-- what this user may reach
         |
         v
 Quest / Room / Reward / Account / Progress service  (bot/services/*)
+         +-- PublicQuestNotifier  (catalogue scan -> verified announcements)
+         +-- MembershipService    (authoritative DM gate)
+         +-- WebhookBackupService (verified SQLite snapshots)
         |
         v
 Legacy quest engine  (src/quest.ts + src/interface.ts)  <-- unchanged parsing
@@ -132,6 +135,7 @@ Migrations live in `bot/database/index.ts`; they run at startup.
 | v7 | `drop_per_room_webhooks` | Drops the per-room webhook columns (replaced by the single developer webhook from env) |
 | v8 | `token_owners` | Rebuilds `tokens` with `owner_user_id` (per-user token ownership) and an index on it |
 | v9 | `quest_announcements` | Public new-quest announcement dedupe: `quest_id` (PK), `first_discovered_at`, `last_detected_at`, `announcement_status`, `message_id`, `channel_id`, `updated_at` + indexes |
+| v10 | `quest_media_membership_and_backup_state` | **Additive only**: extra announcement columns (`announced_at`, `reconcile_nonce`, `attempts`, `last_error`), `quest_metadata`, `guild_membership`, `webhook_backup_state`. No v1–v9 migration was edited and no history row is deleted. |
 
 ### Tables
 
@@ -153,10 +157,22 @@ Migrations live in `bot/database/index.ts`; they run at startup.
 - **`room_accounts`** (v6) — room_id, slot (1, 2, 3, ... continuous), token
   (encrypted), account_id, account_username, status. UNIQUE(room_id, slot).
   Removing an account closes the gap in the sequence.
-- **`quest_announcements`** (v9) — public new-quest dedupe: quest_id (PK),
+- **`quest_announcements`** (v9, extended in v10) — public new-quest dedupe: quest_id (PK),
   first_discovered_at, last_detected_at, announcement_status
-  (`baseline`/`pending`/`announced`), message_id, channel_id, updated_at.
-  The row — not memory — is the dedupe, so a restart never reposts.
+  (`baseline`/`pending`/`announced`), message_id, channel_id, updated_at,
+  plus announced_at, reconcile_nonce, attempts and last_error. The row —
+  not memory — is the dedupe, so a restart never reposts. Rows are never
+  deleted by a migration or a restore; a restore re-inserts any missing ones.
+- **`quest_metadata`** (v10) — official facts of every detected quest
+  (name, verified media urls, rewards, availability, expiry). Private data
+  is never stored here. `first_detected_at` is never overwritten.
+- **`guild_membership`** (v10) — authoritative DM gate state per
+  (user, guild): is_member, joined/left, last_verified_at, last_error.
+  A failed/unavailable API never turns into `is_member = 1`.
+- **`webhook_backup_state`** (v10) — singleton row with the SHA-256, size,
+  message id and CDN attachment of the last *verified* snapshot. A failed
+  upload never overwrites the last good hash. Webhook URLs and tokens are
+  never stored.
 
 ### Deleting data
 
@@ -191,6 +207,19 @@ Required: `DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID`, `ENCRYPTION_KEY`.
 | `PUBLIC_QUEST_CHANNEL_ID` | no | — | Public channel for the "new quest discovered" announcement embeds. Unset = quests are tracked but never posted. Independent of `NOTIFY_CHANNEL_ID` |
 | `AUTO_PILOT` | no | `true` | Auto-pilot: runs the runnable quests of the owner's accounts automatically (a sweep every `AUTO_PILOT_INTERVAL_SECONDS`, plus an immediate run when a new quest is discovered). `false`/`0`/`off` switches it off. Results with a reason per failed quest go to `NOTIFY_CHANNEL_ID` |
 | `AUTO_PILOT_INTERVAL_SECONDS` | no | `10` | Seconds between two auto-pilot sweeps. Minimum 10 (every sweep talks to Discord) |
+| `QUEST_MONITORING_ENABLED` | no | `true` | Automatic new-quest detection. `false`/`0`/`off` stops posting; tracking still continues |
+| `QUEST_MONITOR_INTERVAL_MINUTES` | no | `NOTIFICATION_INTERVAL_MINUTES` | Minutes between catalogue scans |
+| `QUEST_IMAGES_ENABLED` | no | `true` | Show the official Discord banner/thumbnail in announcements |
+| `QUEST_VIDEOS_ENABLED` | no | `true` | Show a verified official promo-video link when Discord published one |
+| `QUEST_MEDIA_FALLBACK` | no | `neutral` | `neutral` adds a factual "no media published" field; `omit` adds nothing |
+| `REQUIRED_GUILD_ID` | no | — | Presence implicitly enables mandatory membership for DM commands |
+| `REQUIRED_GUILD_INVITE` | no | — | https Discord invite shown when DM access is denied |
+| `MEMBERSHIP_VERIFICATION_ENABLED` | no | follows `REQUIRED_GUILD_ID` | Explicit on/off. On without a guild is a startup error |
+| `MEMBERSHIP_VERIFY_INTERVAL_MINUTES` | no | `60` | Periodic membership reconciliation |
+| `MEMBERSHIP_MEMBER_EVENTS` | no | `false` | Opt in to gateway join/leave events (needs Server Members intent in the Developer Portal) |
+| `WEBHOOK_BACKUP_ENABLED` | no | `false` | Upload SQLite snapshots to the existing `WEBHOOK_URL` |
+| `WEBHOOK_BACKUP_INTERVAL_MINUTES` | no | `360` | Minutes between snapshots. Identical content is not uploaded twice |
+| `WEBHOOK_BACKUP_MAX_MB` | no | `8` | Refuse snapshots larger than this |
 
 Render: see `render.yaml`. `NODE_ENV` must NOT be set (npm would skip the
 dev dependencies and the TypeScript build would fail).
@@ -289,9 +318,11 @@ administrative commands are owner-only prefix commands (default prefix `!`).
 | `!admin logs` | Admin audit log |
 | `!admin reload` | Reload catalogue/config |
 | `!admin backup` | Create a database backup |
-| `!admin restore <file>` | Restore a backup |
+| `!admin restore <file>` | Restore a backup (announcement history is merged, never lost) |
+| `!admin webhook-backup [run\|restore]` | Upload a verified snapshot now / restore the last verified one (admins only, safety copy first) |
+| `!admin settings` | Effective environment defaults plus `!admin config` overrides |
 | `!admin maintenance` | Toggle maintenance mode |
-| `!admin config <key> <value>` | Read/write configuration values |
+| `!admin config <key> <value>` | Read/write configuration values (new keys are listed in `docs/UPGRADE-PLAN.md`) |
 | `!admin purge <user>` | Delete every piece of data of a user |
 | `!whitelist list` | The whitelisted servers and users |
 | `!whitelist add <guild|user> <id> [member|admin]` | Allow a server or a user |
@@ -367,6 +398,53 @@ It also runs the room-expiry sweep hourly: rooms older than 30 days are
 deleted, their owners get a DM before the deletion, and `/room renew` keeps
 a room alive.
 
+### Public quest monitor
+
+`bot/services/publicQuestNotifier.ts` re-reads the bundled `quest.json`
+catalogue on a timer (`QUEST_MONITOR_INTERVAL_MINUTES`, default
+`NOTIFICATION_INTERVAL_MINUTES`). The first scan seeds a baseline so a fresh
+install does not flood the channel. Later new quests are announced once,
+using `quest_announcements` as the authoritative dedupe. Before each send a
+random nonce is stored on the row and written into the embed footer; if the
+send succeeds but the database write fails, the next scan finds the message
+in channel history and reconciles instead of posting a duplicate. Rate
+limits (HTTP 429) leave the row `pending` for a later retry. Changing the
+public channel cannot resurrect old announcements because the database row
+is the dedupe, not channel memory. Announcements contain only public
+catalogue facts — never accounts, tokens, progress or user ids.
+
+### Promotional media
+
+`bot/utils/media.ts` accepts only https URLs on Discord's own hosts with
+supported image/video extensions. Relative catalogue asset paths are
+expanded with the official CDN base. `bot/services/questAdapter.ts` exposes
+verified `imageUrl`, `videoUrl` and `thumbnailUrl`; embeds and buttons fall
+back cleanly when Discord published no usable media. Nothing is guessed and
+a third-party URL is dropped.
+
+### Mandatory membership for DMs
+
+`bot/services/membershipService.ts` verifies `Routes.guildMember` via the
+bot REST client before any DM slash command, component, modal, autocomplete
+or owner prefix command runs. Only a real 2xx grants access; 404 is a real
+leave, while 403/429/5xx/timeouts/unavailable guild deny and are logged,
+never treated as membership. Join/leave gateway events are opt-in because
+they require the privileged Server Members intent. A periodic reconciliation
+catches missed events; a closed DM is logged and ignored.
+
+### Automatic webhook backups
+
+`bot/services/webhookBackupService.ts` reuses `AdminService.createSnapshot()`
+(`Database.backup()` / `VACUUM INTO`) and the existing `WEBHOOK_URL`. A
+multipart upload carries the SQLite file plus an embed with its SHA-256,
+size and schema version. The singleton `webhook_backup_state` row stores
+only the hash/message metadata; identical snapshots are never uploaded
+twice and failed uploads never overwrite the last good state. Restore is
+admin-only, checks the embed hash, CDN host, file signature, SHA-256 and
+SQLite `integrity_check`, refuses to roll back a newer local database,
+makes a safety snapshot, and re-inserts any missing announcement/metadata
+history. The webhook URL and token are never logged.
+
 ---
 
 ## 11. Deeper details for integrators
@@ -399,12 +477,14 @@ from the interaction payload.
 `WEBHOOK_URL` is for the developer's own guild. When set, the bot posts:
 room created / account added / account removed — room name, account name
 and event type. The token is never sent. Only `discord.com` hosts are
-accepted. The webhook is not configurable by end users.
+accepted. The webhook is not configurable by end users. The same validated
+endpoint is reused for optional database snapshots; both paths log only
+the webhook id, never the URL or token.
 
 ### Tests
 
 ```bash
-npm run test       # node:test suite (101 tests)
+npm run test       # node:test suite (171 tests)
 npm run typecheck  # tsc --noEmit
 npm run build      # compile to dist/
 ```

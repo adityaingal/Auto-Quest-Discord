@@ -137,13 +137,13 @@ function fakeLinked() {
 
 // ------------------------------------------------------------- migrations
 
-test('the newest migration is v9 and the older ones were not edited', () => {
+test('migrations v1-v9 are unchanged and v10 is additive', () => {
 	assert.deepEqual(
 		MIGRATIONS.map((migration) => migration.version),
-		[1, 2, 3, 4, 5, 6, 7, 8, 9],
+		[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
 	);
 
-	const v9 = MIGRATIONS[MIGRATIONS.length - 1];
+	const v9 = MIGRATIONS.find((migration) => migration.version === 9)!;
 	assert.equal(v9.name, 'quest_announcements');
 	assert.ok(v9.sql.includes('quest_id TEXT PRIMARY KEY'));
 	assert.ok(v9.sql.includes('first_discovered_at'));
@@ -152,6 +152,15 @@ test('the newest migration is v9 and the older ones were not edited', () => {
 	assert.ok(v9.sql.includes('message_id'));
 	assert.ok(v9.sql.includes('channel_id'));
 	assert.ok(v9.sql.includes('idx_quest_announcements_status'));
+
+	const v10 = MIGRATIONS.find((migration) => migration.version === 10)!;
+	assert.equal(v10.name, 'quest_media_membership_and_backup_state');
+	assert.ok(v10.sql.includes('ALTER TABLE quest_announcements ADD COLUMN'));
+	assert.ok(v10.sql.includes('quest_metadata'));
+	assert.ok(v10.sql.includes('guild_membership'));
+	assert.ok(v10.sql.includes('webhook_backup_state'));
+	assert.ok(!v10.sql.includes('DELETE FROM quest_announcements'));
+	assert.ok(!v10.sql.includes('DROP TABLE quest_announcements'));
 });
 
 // ------------------------------------------------- status mapping (part 1)
@@ -417,6 +426,152 @@ test('without a channel the notifier tracks quests but never posts', async (t) =
 	const result = await notifier.scan();
 	assert.equal(result.seeded, true);
 	assert.equal(repositories.countAnnouncements(), 1);
+});
+
+test('a live monitoring override stops posting without losing tracking', async (t) => {
+	const { file, catalog } = tempCatalogue(t, ['q1']);
+	const db = new Database(':memory:');
+	t.after(() => db.close());
+	db.migrate();
+	const repositories = new Repositories(db);
+
+	let posted = 0;
+	let enabled = false;
+	const notifier = new PublicQuestNotifier({
+		repositories,
+		catalog,
+		channelId: 'channel-1',
+		sender: async () => {
+			posted++;
+			return { id: `msg-${posted}`, channelId: 'channel-1' };
+		},
+		getSettings: () => ({
+			questMonitoringEnabled: enabled,
+			questMonitorIntervalMinutes: 15,
+			publicQuestChannelId: 'channel-1',
+			questImagesEnabled: true,
+			questVideosEnabled: true,
+			questMediaFallback: 'neutral',
+		}),
+	});
+
+	assert.equal(notifier.enabled, false);
+	await notifier.scan(); // baseline while off
+	writeCatalogue(file, ['q1', 'q2']);
+	await notifier.scan();
+	assert.equal(posted, 0);
+
+	enabled = true;
+	assert.equal(notifier.enabled, true);
+	const after = await notifier.scan();
+	assert.equal(after.discovered, 0, 'the old quest must not become new again');
+	assert.equal(posted, 0);
+	assert.equal(repositories.countAnnouncements(), 2);
+});
+
+test('a sent message with a failed DB write is reconciled, not reposted', async (t) => {
+	const { file, catalog } = tempCatalogue(t, ['q1']);
+	const db = new Database(':memory:');
+	t.after(() => db.close());
+	db.migrate();
+	const repositories = new Repositories(db);
+
+	let sent = 0;
+	let seenNonce = '';
+	const notifier = new PublicQuestNotifier({
+		repositories,
+		catalog,
+		channelId: 'channel-1',
+		sender: async () => {
+			sent++;
+			return { id: 'msg-lost', channelId: 'channel-1' };
+		},
+		reconciler: async (wanted, questId) => {
+			seenNonce = wanted;
+			assert.equal(questId, 'q2');
+			return { messageId: 'msg-lost', channelId: 'channel-1' };
+		},
+	});
+
+	await notifier.scan(); // baseline
+	writeCatalogue(file, ['q1', 'q2']);
+
+	const result = await notifier.scan();
+	assert.equal(result.announced, 1);
+	assert.equal(sent, 0, 'the reconciler must prevent a second post');
+	assert.equal(seenNonce.length, 36, 'a random nonce must be stored first');
+	assert.equal(repositories.getAnnouncement('q2')?.message_id, 'msg-lost');
+	assert.equal(repositories.getAnnouncement('q2')?.reconcile_nonce, seenNonce);
+});
+
+test('a scan persists verified metadata and honours media toggles', async (t) => {
+	const { file, catalog } = tempCatalogue(t, ['q1']);
+	const db = new Database(':memory:');
+	t.after(() => db.close());
+	db.migrate();
+	const repositories = new Repositories(db);
+
+	// Every catalogue entry gets an official promo video.
+	const writeWithVideo = (ids: string[]) => {
+		const quests = ids.map((id) => {
+			const base = shape(id) as unknown as {
+				id: string;
+				config: Record<string, unknown>;
+			};
+
+			return {
+				...base,
+				config: {
+					...base.config,
+					video_metadata: {
+						assets: {
+							video_player_video:
+								'https://cdn.discordapp.com/promo.webm',
+						},
+					},
+				},
+			};
+		});
+
+		writeFileSync(file, JSON.stringify({ quests }));
+	};
+	writeWithVideo(['q1']);
+
+	const sent: AnnouncementPayload[] = [];
+	let videos = false;
+	const notifier = new PublicQuestNotifier({
+		repositories,
+		catalog,
+		channelId: 'channel-1',
+		sender: async (payload) => {
+			sent.push(payload);
+			return { id: `msg-${sent.length}`, channelId: 'channel-1' };
+		},
+		getSettings: () => ({
+			questMonitoringEnabled: true,
+			questMonitorIntervalMinutes: 15,
+			publicQuestChannelId: 'channel-1',
+			questImagesEnabled: true,
+			questVideosEnabled: videos,
+			questMediaFallback: 'omit',
+		}),
+	});
+
+	await notifier.scan(); // baseline still persists metadata
+	assert.equal(repositories.countQuestMetadata(), 1);
+	const metadata = repositories.getQuestMetadata('q1')!;
+	assert.equal(metadata.video_url, 'https://cdn.discordapp.com/promo.webm');
+	assert.equal(metadata.first_detected_at.length > 0, true);
+
+	writeWithVideo(['q1', 'q2']);
+	videos = false;
+	await notifier.scan();
+	assert.equal(JSON.stringify(sent[0].components).includes('Watch Promo'), false);
+
+	writeWithVideo(['q1', 'q2', 'q3']);
+	videos = true;
+	await notifier.scan();
+	assert.equal(JSON.stringify(sent[1].components).includes('Watch Promo'), true);
 });
 
 // --------------------------------------------------- public panel (part 4)

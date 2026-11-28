@@ -9,6 +9,7 @@ import {
 	QuestView,
 } from '../models/quest';
 import { QuestEligibility } from '../models/enums';
+import { verifiedMediaUrl } from '../utils/media';
 
 /**
  * Adapter between the existing quest engine (src/quest.ts) and the bot
@@ -19,18 +20,38 @@ import { QuestEligibility } from '../models/enums';
 /**
  * The CDN banner of a quest. Discord publishes the quest assets as relative
  * paths on its own CDN, so the URL is derived from those - it is never
- * guessed from memory.
+ * guessed from memory. Third-party or malformed urls are dropped.
  */
-const CDN_BASE = 'https://cdn.discordapp.com/';
-
 function buildImageUrl(quest: Quest): string | null {
 	const assets = quest.config?.assets;
-	const hero = assets?.hero ?? assets?.quest_bar_hero;
 
-	if (!hero) return null;
-	if (hero.startsWith('http')) return hero;
+	return verifiedMediaUrl(
+		assets?.hero ?? assets?.quest_bar_hero ?? null,
+		'image',
+	);
+}
 
-	return `${CDN_BASE}${hero.replace(/^\/+/, '')}`;
+/** Official promotional video and thumbnail, in the order Discord exposes them. */
+export function mediaFromQuest(quest: Quest): {
+	videoUrl: string | null;
+	thumbnailUrl: string | null;
+} {
+	const videoAssets = quest.config?.video_metadata?.assets;
+	const assets = quest.config?.assets;
+
+	const videoUrl =
+		verifiedMediaUrl(videoAssets?.video_player_video, 'video') ??
+		verifiedMediaUrl(videoAssets?.quest_bar_preview_video, 'video') ??
+		verifiedMediaUrl(assets?.hero_video, 'video') ??
+		verifiedMediaUrl(assets?.quest_bar_hero_video, 'video');
+
+	const thumbnailUrl =
+		verifiedMediaUrl(videoAssets?.video_player_thumbnail, 'image') ??
+		verifiedMediaUrl(videoAssets?.quest_bar_preview_thumbnail, 'image') ??
+		verifiedMediaUrl(assets?.hero, 'image') ??
+		verifiedMediaUrl(assets?.quest_bar_hero, 'image');
+
+	return { videoUrl, thumbnailUrl };
 }
 
 function buildRewards(quest: Quest): QuestRewardView[] {
@@ -125,6 +146,7 @@ export function toQuestDetail(
 	live = false,
 ): QuestDetail {
 	const view = toQuestView(quest, source, live);
+	const media = mediaFromQuest(quest);
 
 	return {
 		...view,
@@ -137,6 +159,7 @@ export function toQuestDetail(
 		sharePolicy: quest.config?.share_policy ?? null,
 		ctaLabel: quest.config?.cta_config?.button_label ?? null,
 		ctaLink: quest.config?.cta_config?.link ?? null,
+		...media,
 	};
 }
 
@@ -151,4 +174,11 @@ export function toQuestViewFromPayload(
 	const quest = Quest.create(payload as unknown as QuestShape);
 
 	return toQuestView(quest, source, true);
+}
+
+/** Media of a live quest, using the same validation as catalogue quests. */
+export function mediaFromPayload(payload: QuestPayload): ReturnType<
+	typeof mediaFromQuest
+> {
+	return mediaFromQuest(Quest.create(payload as unknown as QuestShape));
 }

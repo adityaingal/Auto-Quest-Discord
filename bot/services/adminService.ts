@@ -1,10 +1,23 @@
-import { existsSync, mkdirSync, readdirSync, copyFileSync, statSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	copyFileSync,
+	statSync,
+	unlinkSync,
+} from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { Database } from '../database';
-import { Repositories } from '../database/repositories';
+import {
+	Repositories,
+	type AnnouncementRow,
+	type QuestMetadataRow,
+} from '../database/repositories';
 import { Config } from '../config';
 import { Logger } from '../utils/logger';
 import { NotFoundError, ValidationError } from '../utils/errors';
+import { readRuntimeSettings, type RuntimeSettings } from './runtimeSettings';
 
 export type BotStats = {
 	users: number;
@@ -27,6 +40,22 @@ export class AdminService {
 
 	private get backupDir(): string {
 		return resolve(dirname(this.config.databasePath), 'backups');
+	}
+
+	/** Public read-only view used by the webhook backup service. */
+	get backupDirectory(): string {
+		return this.backupDir;
+	}
+
+	/**
+	 * Removes stale WAL/SHM files before a restore. Without this, SQLite could
+	 * replay transactions from the database that was just replaced.
+	 */
+	clearJournal(): void {
+		for (const suffix of ['-wal', '-shm']) {
+			const path = `${this.config.databasePath}${suffix}`;
+			if (existsSync(path)) unlinkSync(path);
+		}
 	}
 
 	stats(): BotStats {
@@ -83,16 +112,26 @@ export class AdminService {
 			.reverse();
 	}
 
-	backup(): string {
+	/** Creates a consistent snapshot with a unique name (never clobbers one). */
+	createSnapshot(prefix = 'quest-bot'): string {
 		mkdirSync(this.backupDir, { recursive: true });
 		const stamp = new Date()
 			.toISOString()
 			.replace(/[:.]/g, '-');
-		const target = join(this.backupDir, `quest-bot-${stamp}.sqlite`);
+		const target = join(
+			this.backupDir,
+			`${prefix}-${stamp}-${randomUUID().slice(0, 8)}.sqlite`,
+		);
 
 		this.database.backup(target);
-		Logger.info(`Database backup written to ${target}`);
+		Logger.info(`Database snapshot written to ${target}`);
 
+		return target;
+	}
+
+	backup(): string {
+		const target = this.createSnapshot('quest-bot');
+		Logger.info(`Database backup written to ${target}`);
 		return target;
 	}
 
@@ -106,11 +145,28 @@ export class AdminService {
 			);
 		}
 
+		// Announcement history is permanent: a restore may add rows, never
+		// remove them. The same applies to the quest metadata history.
+		const announcements = this.database.all<AnnouncementRow>(
+			'SELECT * FROM quest_announcements',
+		);
+		const metadata = this.database.all<QuestMetadataRow>(
+			'SELECT * FROM quest_metadata',
+		);
+
 		this.database.close();
+		this.clearJournal();
 		copyFileSync(source, this.config.databasePath);
 		this.database.reopen();
+		this.database.migrate();
 
-		Logger.warn(`Database restored from ${source}`);
+		const kept = this.repositories.restoreAnnouncementHistory(announcements);
+		const keptMetadata = this.repositories.restoreQuestMetadata(metadata);
+
+		Logger.warn(`Database restored from ${source}`, {
+			announcementsRestored: kept,
+			metadataRestored: keptMetadata,
+		});
 
 		return source;
 	}
@@ -124,11 +180,45 @@ export class AdminService {
 		return enabled;
 	}
 
+	runtimeSettings(): RuntimeSettings {
+		return readRuntimeSettings(this.repositories, this.config);
+	}
+
 	listConfig(): Record<string, string> {
+		const settings = this.runtimeSettings();
+
 		return {
 			...this.repositories.allConfig(),
 			maintenance: this.isMaintenance() ? 'true' : 'false',
 			whitelist: this.isWhitelistEnabled() ? 'true' : 'false',
+			// Effective values (environment defaults + owner overrides).
+			quest_monitoring_enabled: String(settings.questMonitoringEnabled),
+			quest_monitor_interval_minutes: String(
+				settings.questMonitorIntervalMinutes,
+			),
+			public_quest_channel_id: settings.publicQuestChannelId ?? 'none',
+			quest_images_enabled: String(settings.questImagesEnabled),
+			quest_videos_enabled: String(settings.questVideosEnabled),
+			quest_media_fallback: settings.questMediaFallback,
+			membership_verification_enabled: String(
+				settings.membershipVerificationEnabled,
+			),
+			required_guild_id: settings.requiredGuildId ?? 'none',
+			required_guild_invite: settings.requiredGuildInvite ?? 'none',
+			membership_verify_interval_minutes: String(
+				settings.membershipVerifyIntervalMinutes,
+			),
+			membership_member_events: String(settings.membershipMemberEvents),
+			webhook_backup_enabled: String(settings.webhookBackupEnabled),
+			webhook_backup_interval_minutes: String(
+				settings.webhookBackupIntervalMinutes,
+			),
+			webhook_backup_max_mb: String(
+				Math.floor(settings.webhookBackupMaxBytes / (1024 * 1024)),
+			),
+			database_path: this.config.databasePath,
+			database_backup_dir: this.backupDir,
+			webhook_configured: this.config.webhookUrl ? 'true' : 'false',
 		};
 	}
 

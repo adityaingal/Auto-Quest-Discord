@@ -75,6 +75,8 @@ const PREFIX_HELP = [
 	'`!admin reload` - reload the catalogue and configuration',
 	'`!admin backup` - write a database backup',
 	'`!admin restore <file>` - restore a backup',
+	'`!admin webhook-backup [run|restore]` - upload or restore a verified snapshot',
+	'`!admin settings` - show effective monitoring/media/membership/backup config',
 	'`!admin maintenance` - toggle maintenance mode',
 	'`!admin config <key> <value>` - write a configuration value',
 	'`!admin purge <user>` - delete every piece of data of a user',
@@ -327,6 +329,18 @@ export async function runOwnerPanelCommand(
 				break;
 			case 'admin.restore':
 				await handleAdmin(message, services, ['restore', ...args], 'restore', scope);
+				break;
+			case 'admin.webhook-backup':
+				await handleAdmin(
+					message,
+					services,
+					['webhook-backup', ...args],
+					'webhook-backup',
+					scope,
+				);
+				break;
+			case 'admin.settings':
+				await handleAdmin(message, services, ['settings'], 'settings', scope);
 				break;
 			case 'admin.maintenance':
 				await handleAdmin(message, services, ['maintenance'], 'maintenance', scope);
@@ -910,6 +924,69 @@ async function handleAdmin(
 			return;
 		}
 
+		case 'webhook-backup': {
+			const action = (rest[0] ?? 'run').toLowerCase();
+
+			if (action === 'restore') {
+				const result = await services.webhookBackupService.restore(
+					scope.userId,
+				);
+				await reply(
+					message,
+					successEmbed(
+						`Restored from the verified webhook snapshot. A safety copy is at \`${result.path}\`; ${result.historyRows} permanent record(s) were preserved.`,
+					),
+				);
+				return;
+			}
+
+			if (action !== 'run') {
+				await message.reply(
+					'Usage: `!admin webhook-backup [run|restore]`',
+				);
+				return;
+			}
+
+			services.adminService.audit(scope.userId, 'webhook_backup', 'manual');
+			const result = await services.webhookBackupService.run();
+			await reply(
+				message,
+				infoEmbed('WEBHOOK BACKUP', `Status: **${result.status}**.`, [
+					{
+						name: 'Detail',
+						value: result.reason ?? result.messageId ?? result.hash?.slice(0, 16) ?? 'none',
+					},
+				]),
+			);
+			return;
+		}
+
+		case 'settings': {
+			const effective = services.adminService.runtimeSettings();
+			const fields = Object.entries({
+				...effective,
+				webhook_backup_max_mb: Math.floor(
+					effective.webhookBackupMaxBytes / (1024 * 1024),
+				),
+				database_path: services.config.databasePath,
+				webhook_configured: services.config.webhookUrl ? 'true' : 'false',
+			}).map(([key, value]) => ({
+				name: key,
+				value: String(value).slice(0, 1024),
+				inline: true,
+			}));
+
+			await reply(
+				message,
+				infoEmbed(
+					'EFFECTIVE SETTINGS',
+					'Environment defaults with any `!admin config` overrides applied.',
+					fields.slice(0, 25),
+				),
+			);
+			return;
+		}
+
 		case 'maintenance': {
 			const enabled = !services.adminService.isMaintenance();
 
@@ -977,7 +1054,7 @@ async function handleAdmin(
 
 		default:
 			await message.reply(
-				'Usage: `!admin setup|stats|users|logs|reload|backup|restore|maintenance|config|purge` - use `!help` for the details.',
+				'Usage: `!admin setup|stats|users|logs|reload|backup|restore|webhook-backup|settings|maintenance|config|purge` - use `!help` for the details.',
 			);
 	}
 }

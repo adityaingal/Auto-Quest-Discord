@@ -16,6 +16,19 @@ const OPTIONAL = [
 	'LOG_LEVEL',
 	'NOTIFICATION_INTERVAL_MINUTES',
 	'PUBLIC_QUEST_CHANNEL_ID',
+	'QUEST_MONITORING_ENABLED',
+	'QUEST_MONITOR_INTERVAL_MINUTES',
+	'QUEST_IMAGES_ENABLED',
+	'QUEST_VIDEOS_ENABLED',
+	'QUEST_MEDIA_FALLBACK',
+	'REQUIRED_GUILD_ID',
+	'REQUIRED_GUILD_INVITE',
+	'MEMBERSHIP_VERIFICATION_ENABLED',
+	'MEMBERSHIP_VERIFY_INTERVAL_MINUTES',
+	'MEMBERSHIP_MEMBER_EVENTS',
+	'WEBHOOK_BACKUP_ENABLED',
+	'WEBHOOK_BACKUP_INTERVAL_MINUTES',
+	'WEBHOOK_BACKUP_MAX_MB',
 	'AUTO_PILOT',
 	'AUTO_PILOT_INTERVAL_SECONDS',
 	'PORT',
@@ -78,6 +91,26 @@ try {
 				? `on (every ${config.autoPilotIntervalSeconds}s)`
 				: 'off'
 		}`,
+	);
+	console.log(
+		`  quest monitor  : ${
+			config.questMonitoringEnabled
+				? `on (every ${config.questMonitorIntervalMinutes}m)`
+				: 'off'
+		}`,
+	);
+	console.log(
+		`  media          : images ${config.questImagesEnabled ? 'on' : 'off'}, videos ${config.questVideosEnabled ? 'on' : 'off'}, fallback ${config.questMediaFallback}`,
+	);
+	console.log(
+		`  membership     : ${
+			config.membershipVerificationEnabled
+				? `on (guild ${config.requiredGuildId})`
+				: 'off'
+		}`,
+	);
+	console.log(
+		`  webhook backup : ${config.webhookBackupEnabled ? `on (every ${config.webhookBackupIntervalMinutes}m)` : 'off'}`,
 	);
 } catch (error) {
 	console.log(`config error: ${error.message}`);

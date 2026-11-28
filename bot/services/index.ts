@@ -17,6 +17,9 @@ import { AutoService, SessionEntry } from './autoService';
 import { RoomService } from './roomService';
 import { Notifier } from './notifier';
 import { PublicQuestNotifier } from './publicQuestNotifier';
+import { MembershipService } from './membershipService';
+import { WebhookBackupService } from './webhookBackupService';
+import { readRuntimeSettings } from './runtimeSettings';
 import { AutoPilot } from './autoPilot';
 import { UserSession } from '../integrations/userSession';
 import { AccountScope, scopeKey } from './scope';
@@ -44,6 +47,10 @@ export type Services = {
 	notifier: Notifier;
 	/** Detects new catalogue quests and announces them in public. */
 	publicQuestNotifier: PublicQuestNotifier;
+	/** Mandatory guild membership check for DM commands. */
+	membershipService: MembershipService;
+	/** Verified SQLite snapshots to the existing webhook. */
+	webhookBackupService: WebhookBackupService;
 	/** Runs the runnable quests of the operator scope without a command. */
 	autoPilot: AutoPilot;
 	client: Client;
@@ -105,6 +112,24 @@ export function createServices(
 		database,
 		config,
 	);
+
+	/** Environment defaults plus the owner's runtime overrides. */
+	const getSettings = () => readRuntimeSettings(repositories, config);
+
+	const membershipService = new MembershipService({
+		repositories,
+		config,
+		client,
+		getSettings,
+	});
+
+	const webhookBackupService = new WebhookBackupService({
+		config,
+		database,
+		repositories,
+		adminService,
+		getSettings,
+	});
 
 	/**
 	 * The scope of a user. Only the owner and the members of the admin role
@@ -243,6 +268,7 @@ export function createServices(
 		catalog,
 		channelId: config.publicQuestChannelId,
 		client,
+		getSettings,
 		// A brand new quest is run right away - no waiting for the next
 		// sweep. The sweep itself drops the tick when a queue is running.
 		onDiscovered: (questIds) => {
@@ -282,6 +308,8 @@ export function createServices(
 		autoService,
 		notifier,
 		publicQuestNotifier,
+		membershipService,
+		webhookBackupService,
 		autoPilot,
 		client,
 		scopeFor,

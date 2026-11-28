@@ -32,6 +32,9 @@ test('migrations create the expected schema', () => {
 		'bot_config',
 		'oauth_states',
 		'quest_announcements',
+		'quest_metadata',
+		'guild_membership',
+		'webhook_backup_state',
 	]) {
 		assert.ok(tables.includes(table), `missing table ${table}`);
 	}
@@ -43,13 +46,16 @@ test('migration v9 adds the announcement dedupe table on an existing install', (
 	const db = createDatabase();
 	db.migrate();
 
-	// Simulate a database that stopped at migration v8: drop the v9 table
-	// and forget that v9 was applied.
+	// Simulate a database that stopped at migration v8: drop the tables
+	// introduced by v9/v10 and forget that those migrations were applied.
 	db.run('DROP TABLE quest_announcements');
-	db.run('DELETE FROM schema_migrations WHERE version = 9');
+	db.run('DROP TABLE quest_metadata');
+	db.run('DROP TABLE guild_membership');
+	db.run('DROP TABLE webhook_backup_state');
+	db.run('DELETE FROM schema_migrations WHERE version IN (9, 10)');
 
 	const applied = db.migrate();
-	assert.deepEqual(applied, [9]);
+	assert.deepEqual(applied, [9, 10]);
 
 	const tables = db
 		.all<{ name: string }>(
@@ -61,6 +67,58 @@ test('migration v9 adds the announcement dedupe table on an existing install', (
 	// Idempotent: a second run applies nothing.
 	assert.deepEqual(db.migrate(), []);
 
+	db.close();
+});
+
+test('migration v10 preserves existing announcement history', () => {
+	const db = createDatabase();
+	db.migrate();
+
+	// Simulate a v9 install: remove v10 and its additive columns/tables.
+	db.run('DROP INDEX IF EXISTS idx_quest_announcements_nonce');
+	for (const column of [
+		'announced_at',
+		'reconcile_nonce',
+		'attempts',
+		'last_error',
+	]) {
+		db.run(`ALTER TABLE quest_announcements DROP COLUMN ${column}`);
+	}
+	db.run('DROP TABLE quest_metadata');
+	db.run('DROP TABLE guild_membership');
+	db.run('DROP TABLE webhook_backup_state');
+	db.run('DELETE FROM schema_migrations WHERE version = 10');
+
+	// A v9-era row must survive the upgrade byte for byte.
+	db.run(
+		`INSERT INTO quest_announcements
+			(quest_id, first_discovered_at, last_detected_at,
+			 announcement_status, message_id, channel_id, updated_at)
+		 VALUES ('old-quest', '2026-01-01 00:00:00', '2026-01-02 00:00:00',
+			 'announced', 'msg-9', 'channel-9', '2026-01-02 00:00:00')`,
+	);
+
+	assert.deepEqual(db.migrate(), [10]);
+
+	const row = db.get<Record<string, unknown>>(
+		'SELECT * FROM quest_announcements WHERE quest_id = ?',
+		'old-quest',
+	)!;
+	assert.equal(row.first_discovered_at, '2026-01-01 00:00:00');
+	assert.equal(row.last_detected_at, '2026-01-02 00:00:00');
+	assert.equal(row.announcement_status, 'announced');
+	assert.equal(row.message_id, 'msg-9');
+	assert.equal(row.channel_id, 'channel-9');
+	assert.equal(row.attempts, 0);
+
+	const repositories = new Repositories(db);
+	repositories.beginAnnouncementAttempt('old-quest', 'nonce-1');
+	const after = repositories.getAnnouncement('old-quest')!;
+	assert.equal(after.reconcile_nonce, 'nonce-1');
+	assert.equal(after.attempts, 1);
+	assert.equal(after.message_id, 'msg-9');
+
+	assert.deepEqual(db.migrate(), []);
 	db.close();
 });
 

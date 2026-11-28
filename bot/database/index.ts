@@ -294,11 +294,75 @@ export const MIGRATIONS: Migration[] = [
 				ON quest_announcements (last_detected_at DESC);
 		`,
 	},
+	{
+		version: 10,
+		name: 'quest_media_membership_and_backup_state',
+		sql: `
+			-- Additive only: every existing announcement row keeps its id,
+			-- status, message id and timestamps. Nothing is ever cleared.
+			ALTER TABLE quest_announcements ADD COLUMN announced_at TEXT;
+			ALTER TABLE quest_announcements ADD COLUMN reconcile_nonce TEXT;
+			ALTER TABLE quest_announcements ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+			ALTER TABLE quest_announcements ADD COLUMN last_error TEXT;
+
+			CREATE INDEX IF NOT EXISTS idx_quest_announcements_nonce
+				ON quest_announcements (reconcile_nonce);
+
+			CREATE TABLE IF NOT EXISTS quest_metadata (
+				quest_id TEXT PRIMARY KEY,
+				name TEXT,
+				description TEXT,
+				image_url TEXT,
+				video_url TEXT,
+				thumbnail_url TEXT,
+				rewards TEXT,
+				official_url TEXT,
+				availability TEXT,
+				expires_at TEXT,
+				first_detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+				last_updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+			);
+
+			CREATE TABLE IF NOT EXISTS guild_membership (
+				discord_user_id TEXT NOT NULL,
+				guild_id TEXT NOT NULL,
+				is_member INTEGER NOT NULL DEFAULT 0,
+				joined_at TEXT,
+				left_at TEXT,
+				last_verified_at TEXT,
+				last_error TEXT,
+				updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+				PRIMARY KEY (discord_user_id, guild_id)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_guild_membership_guild
+				ON guild_membership (guild_id, is_member);
+
+			CREATE TABLE IF NOT EXISTS webhook_backup_state (
+				id INTEGER PRIMARY KEY CHECK (id = 1),
+				/** Hash of the uploaded bytes - used to verify a restore. */
+				hash TEXT,
+				/** Hash of the logical data, excluding this table, used to
+				 *  decide whether anything actually changed. */
+				content_hash TEXT,
+				size INTEGER NOT NULL DEFAULT 0,
+				message_id TEXT,
+				attachment_url TEXT,
+				generated_at TEXT,
+				source_modified_at TEXT,
+				last_attempt_at TEXT,
+				last_success_at TEXT,
+				last_error TEXT,
+				updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+			);
+		`,
+	},
 ];
 
 export class Database {
 	private db: DatabaseSync;
 	private readonly path: string;
+	private closed = false;
 
 	constructor(path: string) {
 		this.path = path;
@@ -314,8 +378,9 @@ export class Database {
 
 	/** Closes and re-opens the database file (used after a restore). */
 	reopen(): void {
-		this.db.close();
+		this.close();
 		this.db = new DatabaseSync(this.path);
+		this.closed = false;
 		this.db.exec('PRAGMA journal_mode = WAL;');
 		this.db.exec('PRAGMA foreign_keys = ON;');
 	}
@@ -397,6 +462,8 @@ export class Database {
 	}
 
 	close(): void {
+		if (this.closed) return;
 		this.db.close();
+		this.closed = true;
 	}
 }

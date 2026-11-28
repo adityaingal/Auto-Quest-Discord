@@ -4,7 +4,7 @@ import { LinkedAccountProvider } from '../integrations/linkedAccountProvider';
 import { QuestProvider } from '../integrations/questProvider';
 import { QuestDetail, QuestView } from '../models/quest';
 import { QuestEligibility } from '../models/enums';
-import { toQuestViewFromPayload } from './questAdapter';
+import { mediaFromPayload, toQuestViewFromPayload } from './questAdapter';
 import { AutoService } from './autoService';
 import { ProgressService } from './progressService';
 import { AccountScope } from './scope';
@@ -166,6 +166,7 @@ export class QuestService {
 				sharePolicy: null,
 				ctaLabel: null,
 				ctaLink: null,
+				...mediaFromPayload(liveQuest),
 			};
 		}
 

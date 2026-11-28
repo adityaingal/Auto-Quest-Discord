@@ -6,7 +6,11 @@ import {
 	StringSelectMenuBuilder,
 } from 'discord.js';
 import { QuestDetail, QuestView } from '../models/quest';
-import { verifiedQuestUrl } from './embeds';
+import {
+	type AnnouncementMediaOptions,
+	verifiedInviteUrl,
+	verifiedQuestUrl,
+} from './embeds';
 
 export const PAGE_SIZE = 25;
 
@@ -123,6 +127,7 @@ export function buildMaintenanceRow(): ActionRowBuilder<ButtonBuilder> {
  */
 export function buildAnnouncementRow(
 	quest: QuestDetail,
+	options: AnnouncementMediaOptions = {},
 ): ActionRowBuilder<ButtonBuilder> {
 	const components: ButtonBuilder[] = [];
 	const url = verifiedQuestUrl(quest);
@@ -133,6 +138,15 @@ export function buildAnnouncementRow(
 				.setLabel('View Quest')
 				.setStyle(ButtonStyle.Link)
 				.setURL(url),
+		);
+	}
+
+	if (options.videosEnabled !== false && quest.videoUrl) {
+		components.push(
+			new ButtonBuilder()
+				.setLabel('Watch Promo')
+				.setStyle(ButtonStyle.Link)
+				.setURL(quest.videoUrl),
 		);
 	}
 
@@ -148,6 +162,21 @@ export function buildAnnouncementRow(
 	);
 
 	return new ActionRowBuilder<ButtonBuilder>().addComponents(components);
+}
+
+/** Membership denial with an official invite button when one was configured. */
+export function buildMembershipRow(
+	inviteUrl: string | null,
+): ActionRowBuilder<ButtonBuilder> | null {
+	const invite = verifiedInviteUrl(inviteUrl);
+	if (!invite) return null;
+
+	return new ActionRowBuilder<ButtonBuilder>().addComponents(
+		new ButtonBuilder()
+			.setLabel('Join Server')
+			.setStyle(ButtonStyle.Link)
+			.setURL(invite),
+	);
 }
 
 /**

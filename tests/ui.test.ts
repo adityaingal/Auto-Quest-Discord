@@ -110,6 +110,8 @@ test('the quest detail embed contains status, tasks and rewards', () => {
 		sharePolicy: null,
 		ctaLabel: null,
 		ctaLink: null,
+		videoUrl: null,
+		thumbnailUrl: null,
 	});
 	const json = embed.toJSON();
 	const text = JSON.stringify(json);

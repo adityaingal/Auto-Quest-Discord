@@ -30,19 +30,57 @@ function isOperator(
 	return services.scopeFor(userId).isOperator;
 }
 
+/**
+ * One gate for DM commands. Guild commands are untouched; a DM is only
+ * allowed after an authoritative membership result. Anything uncertain
+ * (403, 429, timeout, unavailable guild) denies.
+ */
+async function denyDmIfNotMember(
+	interaction: Interaction,
+	services: ReturnType<typeof createServices>,
+): Promise<boolean> {
+	if (interaction.guildId) return false;
+
+	const decision = await services.membershipService.verify(
+		interaction.user.id,
+	);
+	if (decision.allowed) return false;
+
+	if (interaction.isAutocomplete()) {
+		await interaction.respond([]);
+		return true;
+	}
+
+	if (interaction.isRepliable()) {
+		const denial = services.membershipService.denial();
+		await interaction.reply({
+			...denial,
+			flags: MessageFlags.Ephemeral,
+		});
+	}
+
+	return true;
+}
+
 async function main(): Promise<void> {
 	const config = loadConfig();
 	Logger.setLevel(config.logLevel);
 
 	Logger.info('Starting Discord Quest Completer bot...');
 
-	const client = new Client({
-		intents: [
-			GatewayIntentBits.Guilds,
-			GatewayIntentBits.GuildMessages,
-			GatewayIntentBits.MessageContent,
-		],
-	});
+	const intents = [
+		GatewayIntentBits.Guilds,
+		GatewayIntentBits.GuildMessages,
+		GatewayIntentBits.MessageContent,
+	];
+
+	// The Server Members intent is privileged: it is enabled only when the
+	// operator explicitly opts in and has turned it on in the Developer Portal.
+	if (config.membershipMemberEvents) {
+		intents.push(GatewayIntentBits.GuildMembers);
+	}
+
+	const client = new Client({ intents });
 
 	const services = createServices(config, client);
 	services.registerCommands = () => registerCommands(client, config);
@@ -57,6 +95,22 @@ async function main(): Promise<void> {
 	 */
 	client.on('messageCreate', async (message) => {
 		try {
+			// Only DM commands need the gate; ordinary chat is not touched.
+			if (
+				!message.guild &&
+				!message.author.bot &&
+				message.content.trim().startsWith(services.config.prefix)
+			) {
+				const decision = await services.membershipService.verify(
+					message.author.id,
+				);
+
+				if (!decision.allowed) {
+					await message.reply(services.membershipService.denial());
+					return;
+				}
+			}
+
 			await handlePrefixCommand(message, services);
 		} catch (error) {
 			Logger.error(
@@ -99,6 +153,10 @@ async function main(): Promise<void> {
 						return;
 					}
 
+					return;
+				}
+
+				if (await denyDmIfNotMember(interaction, services)) {
 					return;
 				}
 
@@ -176,6 +234,31 @@ async function main(): Promise<void> {
 	};
 
 	attachInteractions(client);
+
+	if (config.membershipMemberEvents) {
+		client.on('guildMemberAdd', (member) => {
+			const guildId = services.adminService.runtimeSettings().requiredGuildId;
+			if (!guildId || member.guild.id !== guildId) return;
+
+			services.membershipService.onMemberAdd(
+				member.id,
+				member.joinedAt?.toISOString() ?? null,
+			);
+		});
+
+		client.on('guildMemberRemove', (member) => {
+			const guildId = services.adminService.runtimeSettings().requiredGuildId;
+			if (!guildId || member.guild.id !== guildId) return;
+
+			void services.membershipService
+				.onMemberRemove(member.id)
+				.catch((error: unknown) => {
+					Logger.warn(
+						`Member leave handler failed: ${(error as Error).message}`,
+					);
+				});
+		});
+	}
 
 	let announced = false;
 
@@ -275,9 +358,25 @@ async function main(): Promise<void> {
 		config.notificationIntervalMinutes,
 	);
 	services.publicQuestNotifier.start(
-		config.notificationIntervalMinutes,
+		config.questMonitorIntervalMinutes,
+	);
+	services.membershipService.start(
+		config.membershipVerifyIntervalMinutes,
+	);
+	services.webhookBackupService.start(
+		config.webhookBackupIntervalMinutes,
 	);
 	services.autoPilot.start(config.autoPilotIntervalSeconds);
+
+	// One immediate snapshot on boot when the feature is enabled. Hash-based
+	// change detection means an unchanged database is not uploaded again.
+	if (services.adminService.runtimeSettings().webhookBackupEnabled) {
+		void services.webhookBackupService.run().catch((error: unknown) => {
+			Logger.warn(
+				`Initial webhook backup failed: ${(error as Error).message}`,
+			);
+		});
+	}
 
 	Logger.info('Bot is ready.');
 
@@ -285,6 +384,8 @@ async function main(): Promise<void> {
 		Logger.info(`Received ${signal}, shutting down...`);
 		services.notificationService.stop();
 		services.publicQuestNotifier.stop();
+		services.membershipService.stop();
+		services.webhookBackupService.stop();
 		services.autoPilot.stop();
 		await new Promise<void>((resolve) => {
 			server.close(() => resolve());

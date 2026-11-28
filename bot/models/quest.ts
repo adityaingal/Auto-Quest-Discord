@@ -50,4 +50,8 @@ export type QuestDetail = QuestView & {
 	sharePolicy: string | null;
 	ctaLabel: string | null;
 	ctaLink: string | null;
+	/** Validated official video URL, when Discord published one. */
+	videoUrl: string | null;
+	/** Validated official video thumbnail, when Discord published one. */
+	thumbnailUrl: string | null;
 };
