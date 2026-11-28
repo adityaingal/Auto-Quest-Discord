@@ -991,8 +991,9 @@ export class InteractionRouter {
 	}
 
 	/**
-	 * The "Refresh" button of an announcement: re-reads the quest from the
-	 * catalogue and replaces the announcement content in place.
+	 * Legacy handler for announcements posted before the "Refresh" button was
+	 * removed from new panels. Keeping it means those old messages do not
+	 * turn into failed interactions.
 	 */
 	private async handleAnnouncementRefresh(
 		interaction: Interaction,

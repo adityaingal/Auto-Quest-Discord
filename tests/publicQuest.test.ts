@@ -232,13 +232,14 @@ test('the announcement embed carries the facts and no private data', async () =>
 	assert.ok(!text.includes('user_status'));
 	assert.ok(!text.includes('token'));
 
-	// Buttons: View Quest (verified https URL), Available Quests, Refresh.
+	// Buttons: View Quest (verified https URL) and Available Quests. The
+	// old Refresh button is no longer part of new announcements.
 	const row = buildAnnouncementRow(detail).toJSON() as {
 		components: { custom_id?: string; url?: string; label?: string }[];
 	};
 	const ids = row.components.map((component) => component.custom_id);
 	assert.ok(ids.includes('quest:ann_quests'));
-	assert.ok(ids.some((id) => id?.startsWith('quest:ann_refresh:')));
+	assert.ok(!ids.some((id) => id?.startsWith('quest:ann_refresh:')));
 	const link = row.components.find((component) => component.url);
 	assert.equal(link?.label, 'View Quest');
 	assert.ok(link?.url?.startsWith('https://'));

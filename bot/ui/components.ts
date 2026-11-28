@@ -122,8 +122,8 @@ export function buildMaintenanceRow(): ActionRowBuilder<ButtonBuilder> {
 
 /**
  * The buttons under a public new-quest announcement: the official quest
- * link (only when the catalogue published a verified https URL), the public
- * quest browser and a refresh of the announcement itself.
+ * link (only when the catalogue published a verified https URL), the
+ * official promo video (when published) and the public quest browser.
  */
 export function buildAnnouncementRow(
 	quest: QuestDetail,
@@ -155,10 +155,6 @@ export function buildAnnouncementRow(
 			.setCustomId('quest:ann_quests')
 			.setLabel('Available Quests')
 			.setStyle(ButtonStyle.Primary),
-		new ButtonBuilder()
-			.setCustomId(`quest:ann_refresh:${quest.id}`)
-			.setLabel('Refresh')
-			.setStyle(ButtonStyle.Secondary),
 	);
 
 	return new ActionRowBuilder<ButtonBuilder>().addComponents(components);
